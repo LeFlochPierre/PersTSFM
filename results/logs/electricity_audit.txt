@@ -1,0 +1,17 @@
+ElectricityLoadDiagrams20112014 audit
+====================================
+File: data/raw/electricity/LD2011_2014.txt
+Rows / timestamps: 140,256
+Entities: 370
+First timestamp: 2011-01-01 00:15:00
+Last timestamp: 2015-01-01 00:00:00
+Non-15-minute timestamp gaps: 0
+Non-monotonic timestamp steps: 0
+Total missing numeric values: 0
+All-zero entities: 0
+Median zero fraction: 0.2499
+Min zero fraction: 0.0000
+Max zero fraction: 0.8864
+Earliest client first-nonzero: 2011-01-01 00:15:00
+Latest client first-nonzero: 2014-07-18 00:15:00
+Median active span (days): 1096.0

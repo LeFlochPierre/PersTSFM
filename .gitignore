@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Environments
+.venv/
+venv/
+env/
+.env/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Raw / processed datasets
+data/raw/
+data/processed/
+
+# External repositories and downloaded resources
+external/
+
+# Large experiment outputs
+results/**/*.parquet
+results/**/*.pkl
+results/**/*.pickle
+results/**/*.pt
+results/**/*.pth
+results/**/*.ckpt
+results/**/*.npz
+results/**/*.npy
+
+# Model/cache files
+.cache/
+huggingface/
+wandb/
+
+# Temporary files
+*.tmp
+*.log
+*~

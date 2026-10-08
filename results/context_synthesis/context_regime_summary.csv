@@ -1,0 +1,7 @@
+dataset,model,reference_context,reference_context_days,reference_mae,best_context,best_context_days,best_context_label,best_mae,relative_improvement_percent,earliest_within_1pct_context,earliest_within_1pct_days,earliest_within_1pct_label,earliest_within_2pct_context,earliest_within_2pct_days,earliest_within_2pct_label,maximum_tested_context_days,best_at_maximum_tested_context
+Electricity,Chronos-2,4,4.0,22.32074035361186,12.0,12.0,12d,19.76106312231927,11.46770757036467,8.0,8.0,8d,7.0,7.0,7d,31.0,False
+Electricity,TimesFM 3,4,4.0,25.0202387924391,10.0,10.0,10d,21.018834007870414,15.992672243311581,10.0,10.0,10d,9.0,9.0,9d,31.0,False
+PEMS-BAY,Chronos-2,24,1.0,2.516714981056395,336.0,14.0,14d,1.5223737312011976,39.50948984448852,240.0,10.0,10d,240.0,10.0,10d,28.0,False
+PEMS-BAY,TimesFM 3,24,1.0,2.2150553352370554,672.0,28.0,28d,1.3060304655307005,41.03847227857497,504.0,21.0,21d,240.0,10.0,10d,28.0,True
+HUPA-UCM,Chronos-2,24,1.0,14.686514797245032,96.0,4.0,4d,13.646965266427909,7.078258832463959,96.0,4.0,4d,96.0,4.0,4d,7.0,False
+HUPA-UCM,TimesFM 3,24,1.0,14.504788382848105,168.0,7.0,7d,13.638055260976154,5.9754964980865335,168.0,7.0,7d,168.0,7.0,7d,7.0,True
