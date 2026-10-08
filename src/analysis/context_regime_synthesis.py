@@ -3,91 +3,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-
-# ---------------------------------------------------------------------
-# Inputs
-# ---------------------------------------------------------------------
-
-DATASETS = [
-    {
-        "dataset": "Electricity",
-        "model": "Chronos-2",
-        "path": Path(
-            "results/context_threshold/"
-            "chronos2_context_summary.csv"
-        ),
-        "context_col": "context_days",
-        "label_col": "context_label",
-        "metric_col": "mean_mae",
-        "reference_context": 4,
-        "context_unit": "days",
-    },
-    {
-        "dataset": "Electricity",
-        "model": "TimesFM 3",
-        "path": Path(
-            "results/context_threshold/"
-            "timesfm3_context_summary.csv"
-        ),
-        "context_col": "context_days",
-        "label_col": "context_label",
-        "metric_col": "mean_mae",
-        "reference_context": 4,
-        "context_unit": "days",
-    },
-    {
-        "dataset": "PEMS-BAY",
-        "model": "Chronos-2",
-        "path": Path(
-            "results/pems_bay/context/"
-            "chronos2_pems_bay_context_summary.csv"
-        ),
-        "context_col": "context_hours",
-        "label_col": "context_label",
-        "metric_col": "mean_mae",
-        "reference_context": 24,
-        "context_unit": "hours",
-    },
-    {
-        "dataset": "PEMS-BAY",
-        "model": "TimesFM 3",
-        "path": Path(
-            "results/pems_bay/context/"
-            "timesfm3_pems_bay_context_summary.csv"
-        ),
-        "context_col": "context_hours",
-        "label_col": "context_label",
-        "metric_col": "mean_mae",
-        "reference_context": 24,
-        "context_unit": "hours",
-    },
-    {
-        "dataset": "HUPA-UCM",
-        "model": "Chronos-2",
-        "path": Path(
-            "results/hupa_ucm/context/"
-            "chronos2_hupa_context_summary.csv"
-        ),
-        "context_col": "context_hours",
-        "label_col": "context_label",
-        "metric_col": "mean_participant_mae",
-        "reference_context": 24,
-        "context_unit": "hours",
-    },
-    {
-        "dataset": "HUPA-UCM",
-        "model": "TimesFM 3",
-        "path": Path(
-            "results/hupa_ucm/context/"
-            "timesfm3_hupa_context_summary.csv"
-        ),
-        "context_col": "context_hours",
-        "label_col": "context_label",
-        "metric_col": "mean_participant_mae",
-        "reference_context": 24,
-        "context_unit": "hours",
-    },
-]
+from src.data.registry import context_label
 
 
 OUT_DIR = Path(
@@ -99,461 +15,327 @@ OUT_DIR.mkdir(
     exist_ok=True,
 )
 
-SUMMARY_PATH = (
-    OUT_DIR
-    / "context_regime_summary.csv"
-)
 
-CURVES_PATH = (
-    OUT_DIR
-    / "normalized_context_curves.csv"
-)
+RUNS = [
+    {
+        "dataset": "Electricity",
+        "model": "Chronos-2",
+        "path": Path(
+            "results/electricity/context/"
+            "chronos2/summary.csv"
+        ),
+        "reference_hours": 96,
+    },
+    {
+        "dataset": "Electricity",
+        "model": "TimesFM 3",
+        "path": Path(
+            "results/electricity/context/"
+            "timesfm3/summary.csv"
+        ),
+        "reference_hours": 96,
+    },
+    {
+        "dataset": "PEMS-BAY",
+        "model": "Chronos-2",
+        "path": Path(
+            "results/pems_bay/context/"
+            "chronos2/summary.csv"
+        ),
+        "reference_hours": 24,
+    },
+    {
+        "dataset": "PEMS-BAY",
+        "model": "TimesFM 3",
+        "path": Path(
+            "results/pems_bay/context/"
+            "timesfm3/summary.csv"
+        ),
+        "reference_hours": 24,
+    },
+    {
+        "dataset": "HUPA-UCM",
+        "model": "Chronos-2",
+        "path": Path(
+            "results/hupa_ucm/context/"
+            "chronos2/summary.csv"
+        ),
+        "reference_hours": 24,
+    },
+    {
+        "dataset": "HUPA-UCM",
+        "model": "TimesFM 3",
+        "path": Path(
+            "results/hupa_ucm/context/"
+            "timesfm3/summary.csv"
+        ),
+        "reference_hours": 24,
+    },
+]
 
 
-# ---------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------
-
-def to_days(
-    value,
-    unit,
+def earliest_within(
+    df,
+    best_mae,
+    fraction,
 ):
-
-    if unit == "days":
-        return float(value)
-
-    if unit == "hours":
-        return float(value) / 24.0
-
-    raise ValueError(
-        f"Unknown context unit: {unit}"
+    threshold = (
+        best_mae
+        * (1.0 + fraction)
     )
 
+    eligible = df[
+        df["mean_entity_mae"]
+        <= threshold
+    ]
 
-# ---------------------------------------------------------------------
-# Analyse curves
-# ---------------------------------------------------------------------
+    if len(eligible) == 0:
+        return np.nan
+
+    return float(
+        eligible[
+            "context_hours"
+        ].min()
+    )
+
 
 summary_rows = []
-curve_rows = []
+curve_frames = []
 
 
-for spec in DATASETS:
+for run in RUNS:
 
-    path = spec["path"]
-
-    if not path.exists():
-        print(
-            f"WARNING: missing {path}"
+    if not run["path"].exists():
+        raise FileNotFoundError(
+            run["path"]
         )
-        continue
 
     df = pd.read_csv(
-        path
+        run["path"]
     )
 
-    context_col = spec[
-        "context_col"
-    ]
+    required = {
+        "context_hours",
+        "context_label",
+        "mean_entity_mae",
+    }
 
-    label_col = spec[
-        "label_col"
-    ]
+    missing = (
+        required
+        - set(df.columns)
+    )
 
-    metric_col = spec[
-        "metric_col"
-    ]
-
-
-    # -----------------------------------------------------------------
-    # Some older result files, especially Electricity, do not contain
-    # an explicit context_label column. Reconstruct it consistently.
-    # -----------------------------------------------------------------
-
-    if label_col not in df.columns:
-
-        def make_context_label(value):
-
-            value = float(value)
-
-            if spec["context_unit"] == "days":
-
-                if value.is_integer():
-                    return f"{int(value)}d"
-
-                return f"{value:g}d"
-
-            if spec["context_unit"] == "hours":
-
-                if (
-                    value >= 24
-                    and value % 24 == 0
-                ):
-
-                    days = int(
-                        value // 24
-                    )
-
-                    return f"{days}d"
-
-                if value.is_integer():
-                    return f"{int(value)}h"
-
-                return f"{value:g}h"
-
-            raise ValueError(
-                "Unknown context unit: "
-                f"{spec['context_unit']}"
-            )
-
-
-        df[label_col] = (
-            df[
-                context_col
-            ]
-            .apply(
-                make_context_label
-            )
+    if missing:
+        raise RuntimeError(
+            f"{run['path']} missing "
+            f"columns: {sorted(missing)}"
         )
-
 
     df = (
         df
         .sort_values(
-            context_col
+            "context_hours"
         )
-        .reset_index(drop=True)
+        .reset_index(
+            drop=True
+        )
     )
 
-    contexts = df[
-        context_col
-    ].to_numpy(
-        dtype=float
+    ref_mask = np.isclose(
+        df["context_hours"],
+        run["reference_hours"],
     )
 
-    maes = df[
-        metric_col
-    ].to_numpy(
-        dtype=float
-    )
-
-    # -------------------------------------------------------------
-    # Reference
-    # -------------------------------------------------------------
-
-    reference_mask = (
-        df[
-            context_col
-        ]
-        == spec[
-            "reference_context"
-        ]
-    )
-
-    if (
-        reference_mask.sum()
-        != 1
-    ):
+    if ref_mask.sum() != 1:
         raise RuntimeError(
-            f"{spec['dataset']} / "
-            f"{spec['model']}: "
-            "reference context not unique."
+            f"{run['dataset']} / "
+            f"{run['model']}: expected "
+            "exactly one reference row."
         )
-
-    reference_row = df.loc[
-        reference_mask
-    ].iloc[0]
 
     reference_mae = float(
-        reference_row[
-            metric_col
-        ]
+        df.loc[
+            ref_mask,
+            "mean_entity_mae",
+        ].iloc[0]
     )
 
-    # -------------------------------------------------------------
-    # Best observed
-    # -------------------------------------------------------------
-
-    best_idx = int(
-        np.argmin(
-            maes
-        )
+    best_index = (
+        df[
+            "mean_entity_mae"
+        ].idxmin()
     )
 
-    best_row = df.iloc[
-        best_idx
+    best = df.loc[
+        best_index
     ]
 
-    best_context = float(
-        best_row[
-            context_col
-        ]
+    best_hours = float(
+        best["context_hours"]
     )
 
     best_mae = float(
-        best_row[
-            metric_col
-        ]
+        best["mean_entity_mae"]
     )
 
-    maximum_context = float(
-        contexts.max()
-    )
-
-    right_censored = bool(
-        best_context
-        == maximum_context
-    )
-
-    # -------------------------------------------------------------
-    # Earliest context within 1% and 2% of best
-    # -------------------------------------------------------------
-
-    one_percent_threshold = (
-        best_mae * 1.01
-    )
-
-    two_percent_threshold = (
-        best_mae * 1.02
-    )
-
-    within_1 = df[
+    max_hours = float(
         df[
-            metric_col
-        ]
-        <= one_percent_threshold
-    ]
-
-    within_2 = df[
-        df[
-            metric_col
-        ]
-        <= two_percent_threshold
-    ]
-
-    earliest_1 = (
-        within_1.iloc[0]
+            "context_hours"
+        ].max()
     )
 
-    earliest_2 = (
-        within_2.iloc[0]
+    l1_hours = earliest_within(
+        df,
+        best_mae,
+        0.01,
     )
 
-    earliest_1_context = float(
-        earliest_1[
-            context_col
-        ]
+    l2_hours = earliest_within(
+        df,
+        best_mae,
+        0.02,
     )
 
-    earliest_2_context = float(
-        earliest_2[
-            context_col
-        ]
-    )
-
-    # -------------------------------------------------------------
-    # Improvement
-    # -------------------------------------------------------------
-
-    absolute_gain = (
-        reference_mae
-        - best_mae
-    )
-
-    relative_gain = (
+    improvement_pct = (
         100.0
-        * absolute_gain
+        * (
+            reference_mae
+            - best_mae
+        )
         / reference_mae
     )
 
-    # -------------------------------------------------------------
-    # Normalized gain curve
-    #
-    # 0 = reference performance
-    # 1 = best observed performance
-    # -------------------------------------------------------------
-
-    if absolute_gain > 0:
-
-        gain_fraction = (
-            reference_mae
-            - maes
-        ) / absolute_gain
-
-    else:
-
-        gain_fraction = np.full(
-            len(df),
-            np.nan,
+    right_censored = bool(
+        np.isclose(
+            best_hours,
+            max_hours,
         )
-
-    for i, row in df.iterrows():
-
-        context_value = float(
-            row[
-                context_col
-            ]
-        )
-
-        curve_rows.append(
-            {
-                "dataset": (
-                    spec["dataset"]
-                ),
-                "model": (
-                    spec["model"]
-                ),
-                "context": (
-                    context_value
-                ),
-                "context_unit": (
-                    spec[
-                        "context_unit"
-                    ]
-                ),
-                "context_days": (
-                    to_days(
-                        context_value,
-                        spec[
-                            "context_unit"
-                        ],
-                    )
-                ),
-                "context_label": (
-                    row[
-                        label_col
-                    ]
-                ),
-                "mae": float(
-                    row[
-                        metric_col
-                    ]
-                ),
-                "reference_mae": (
-                    reference_mae
-                ),
-                "best_mae": (
-                    best_mae
-                ),
-                "gain_fraction": float(
-                    gain_fraction[i]
-                ),
-            }
-        )
-
-    # -------------------------------------------------------------
-    # Summary
-    # -------------------------------------------------------------
+    )
 
     summary_rows.append(
         {
             "dataset": (
-                spec["dataset"]
+                run["dataset"]
             ),
-
             "model": (
-                spec["model"]
+                run["model"]
             ),
-
-            "reference_context": (
-                spec[
-                    "reference_context"
+            "reference_context_hours": (
+                run[
+                    "reference_hours"
                 ]
             ),
-
-            "reference_context_days": (
-                to_days(
-                    spec[
-                        "reference_context"
-                    ],
-                    spec[
-                        "context_unit"
-                    ],
+            "reference_context_label": (
+                context_label(
+                    run[
+                        "reference_hours"
+                    ]
                 )
             ),
-
             "reference_mae": (
                 reference_mae
             ),
-
-            "best_context": (
-                best_context
+            "best_context_hours": (
+                best_hours
             ),
-
-            "best_context_days": (
-                to_days(
-                    best_context,
-                    spec[
-                        "context_unit"
-                    ],
+            "best_context_label": (
+                context_label(
+                    best_hours
                 )
             ),
-
-            "best_context_label": (
-                best_row[
-                    label_col
-                ]
-            ),
-
             "best_mae": (
                 best_mae
             ),
-
-            "relative_improvement_percent": (
-                relative_gain
+            "improvement_pct": (
+                improvement_pct
             ),
-
-            "earliest_within_1pct_context": (
-                earliest_1_context
+            "l1_context_hours": (
+                l1_hours
             ),
-
-            "earliest_within_1pct_days": (
-                to_days(
-                    earliest_1_context,
-                    spec[
-                        "context_unit"
-                    ],
+            "l1_context_label": (
+                context_label(
+                    l1_hours
                 )
             ),
-
-            "earliest_within_1pct_label": (
-                earliest_1[
-                    label_col
-                ]
+            "l2_context_hours": (
+                l2_hours
             ),
-
-            "earliest_within_2pct_context": (
-                earliest_2_context
-            ),
-
-            "earliest_within_2pct_days": (
-                to_days(
-                    earliest_2_context,
-                    spec[
-                        "context_unit"
-                    ],
+            "l2_context_label": (
+                context_label(
+                    l2_hours
                 )
             ),
-
-            "earliest_within_2pct_label": (
-                earliest_2[
-                    label_col
-                ]
+            "max_context_hours": (
+                max_hours
             ),
-
-            "maximum_tested_context_days": (
-                to_days(
-                    maximum_context,
-                    spec[
-                        "context_unit"
-                    ],
+            "max_context_label": (
+                context_label(
+                    max_hours
                 )
             ),
-
-            "best_at_maximum_tested_context": (
+            "right_censored": (
                 right_censored
             ),
         }
+    )
+
+    curve = df[
+        [
+            "context_hours",
+            "context_label",
+            "mean_entity_mae",
+        ]
+    ].copy()
+
+    curve.insert(
+        0,
+        "model",
+        run["model"],
+    )
+
+    curve.insert(
+        0,
+        "dataset",
+        run["dataset"],
+    )
+
+    curve[
+        "context_days"
+    ] = (
+        curve[
+            "context_hours"
+        ]
+        / 24.0
+    )
+
+    curve[
+        "reference_mae"
+    ] = reference_mae
+
+    curve[
+        "mae_relative_to_reference"
+    ] = (
+        curve[
+            "mean_entity_mae"
+        ]
+        / reference_mae
+    )
+
+    curve[
+        "improvement_vs_reference_pct"
+    ] = (
+        100.0
+        * (
+            reference_mae
+            - curve[
+                "mean_entity_mae"
+            ]
+        )
+        / reference_mae
+    )
+
+    curve_frames.append(
+        curve
     )
 
 
@@ -561,104 +343,75 @@ summary = pd.DataFrame(
     summary_rows
 )
 
-curves = pd.DataFrame(
-    curve_rows
+curves = pd.concat(
+    curve_frames,
+    ignore_index=True,
 )
 
 
-# ---------------------------------------------------------------------
-# Save
-# ---------------------------------------------------------------------
+summary_path = (
+    OUT_DIR
+    / "context_regime_summary.csv"
+)
+
+curves_path = (
+    OUT_DIR
+    / "normalized_context_curves.csv"
+)
+
 
 summary.to_csv(
-    SUMMARY_PATH,
+    summary_path,
     index=False,
 )
 
 curves.to_csv(
-    CURVES_PATH,
+    curves_path,
     index=False,
 )
 
 
-# ---------------------------------------------------------------------
-# Report
-# ---------------------------------------------------------------------
+display = summary.copy()
 
-print()
-print("=" * 100)
-print("PersTSFM cross-dataset context regime synthesis")
-print("=" * 100)
-
-display = summary[
-    [
-        "dataset",
-        "model",
-        "reference_mae",
-        "best_context_label",
-        "best_mae",
-        "relative_improvement_percent",
-        "earliest_within_1pct_label",
-        "earliest_within_2pct_label",
-        "maximum_tested_context_days",
-        "best_at_maximum_tested_context",
-    ]
-].copy()
-
-for col in [
+for column in [
     "reference_mae",
     "best_mae",
-    "relative_improvement_percent",
-    "maximum_tested_context_days",
+    "improvement_pct",
 ]:
-    display[col] = (
-        display[col]
-        .round(3)
+    display[column] = (
+        display[column]
+        .round(4)
     )
 
-print()
+
+print("=" * 100)
 print(
-    display.to_string(
+    "PersTSFM context-regime synthesis"
+)
+print("=" * 100)
+print()
+
+print(
+    display[
+        [
+            "dataset",
+            "model",
+            "reference_context_label",
+            "reference_mae",
+            "best_context_label",
+            "best_mae",
+            "improvement_pct",
+            "l1_context_label",
+            "l2_context_label",
+            "max_context_label",
+            "right_censored",
+        ]
+    ].to_string(
         index=False
     )
 )
-
-
-print()
-print("=" * 100)
-print("Effective-context scale in days")
-print("=" * 100)
-
-effective = summary[
-    [
-        "dataset",
-        "model",
-        "best_context_days",
-        "earliest_within_1pct_days",
-        "earliest_within_2pct_days",
-        "best_at_maximum_tested_context",
-    ]
-].copy()
-
-for col in [
-    "best_context_days",
-    "earliest_within_1pct_days",
-    "earliest_within_2pct_days",
-]:
-    effective[col] = (
-        effective[col]
-        .round(2)
-    )
-
-print()
-print(
-    effective.to_string(
-        index=False
-    )
-)
-
 
 print()
 print("Saved:")
-print(f"  {SUMMARY_PATH}")
-print(f"  {CURVES_PATH}")
+print(f"  {summary_path}")
+print(f"  {curves_path}")

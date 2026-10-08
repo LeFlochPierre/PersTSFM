@@ -62,7 +62,7 @@ def parse_args():
 
     parser.add_argument(
         "--output-root",
-        default="results/modular",
+        default="results",
     )
 
     return parser.parse_args()

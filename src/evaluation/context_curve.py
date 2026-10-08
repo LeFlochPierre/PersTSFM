@@ -30,7 +30,7 @@ def run_context_curve(
     split=None,
     context_hours=None,
     max_cases=None,
-    output_root="results/modular",
+    output_root="results",
 ):
     # -------------------------------------------------------------
     # Dataset
