@@ -1,0 +1,3 @@
+model,electricity_minus_pems,bootstrap_ci_low,bootstrap_ci_high,probability_electricity_greater
+chronos2,0.6185680465062144,0.37259125905841917,0.9538341489530968,1.0
+timesfm3,0.40606004010203123,0.1619138731178312,0.810683901050724,0.99885
