@@ -1,0 +1,1193 @@
+from hashlib import sha256
+from pathlib import Path
+import time
+
+import numpy as np
+import pandas as pd
+
+from src.data.registry import (
+    context_steps,
+    extract_case,
+    load_dataset,
+)
+
+from src.evaluation.metrics import (
+    add_prediction_metrics,
+)
+
+from src.models.adapters import (
+    ForecastInput,
+    build_model,
+)
+
+
+def _safe_standardize(values):
+    values = np.asarray(
+        values,
+        dtype=float,
+    )
+
+    mean = float(
+        np.mean(values)
+    )
+
+    std = float(
+        np.std(values)
+    )
+
+    if std < 1e-8:
+        std = 1.0
+
+    return (
+        (values - mean) / std,
+        mean,
+        std,
+    )
+
+
+def _deterministic_rng(case_id):
+    digest = sha256(
+        case_id.encode("utf-8")
+    ).digest()
+
+    seed = int.from_bytes(
+        digest[:8],
+        byteorder="little",
+        signed=False,
+    )
+
+    return np.random.default_rng(
+        seed
+    )
+
+
+def _find_matched_donor(
+    dataset,
+    target_id,
+    recent_index,
+    target_recent,
+):
+    target_z, _, _ = (
+        _safe_standardize(
+            target_recent
+        )
+    )
+
+    candidates = []
+
+    for donor_id, donor_series in (
+        dataset.series.items()
+    ):
+        if donor_id == target_id:
+            continue
+
+        donor_recent = (
+            donor_series.reindex(
+                recent_index
+            )
+        )
+
+        if donor_recent.isna().any():
+            continue
+
+        donor_values = (
+            donor_recent.to_numpy(
+                dtype=float
+            )
+        )
+
+        donor_z, _, _ = (
+            _safe_standardize(
+                donor_values
+            )
+        )
+
+        distance = float(
+            np.sqrt(
+                np.mean(
+                    (
+                        target_z
+                        - donor_z
+                    )
+                    ** 2
+                )
+            )
+        )
+
+        candidates.append(
+            (
+                distance,
+                donor_id,
+                donor_values,
+            )
+        )
+
+    if not candidates:
+        raise RuntimeError(
+            f"No valid donor found "
+            f"for {target_id}."
+        )
+
+    candidates.sort(
+        key=lambda x: (
+            x[0],
+            x[1],
+        )
+    )
+
+    return candidates[0]
+
+
+def _shuffle_daily_blocks(
+    old_values,
+    steps_per_day,
+    case_id,
+):
+    old_values = np.asarray(
+        old_values,
+        dtype=float,
+    )
+
+    if (
+        len(old_values)
+        % steps_per_day
+        != 0
+    ):
+        raise RuntimeError(
+            "Old-history length is "
+            "not divisible into days."
+        )
+
+    n_blocks = (
+        len(old_values)
+        // steps_per_day
+    )
+
+    blocks = (
+        old_values.reshape(
+            n_blocks,
+            steps_per_day,
+        )
+    )
+
+    rng = _deterministic_rng(
+        case_id
+    )
+
+    order = rng.permutation(
+        n_blocks
+    )
+
+    if np.array_equal(
+        order,
+        np.arange(
+            n_blocks
+        ),
+    ):
+        order = np.roll(
+            order,
+            1,
+        )
+
+    shuffled = (
+        blocks[
+            order
+        ]
+        .reshape(-1)
+    )
+
+    return shuffled, order
+
+
+def _build_case_conditions(
+    dataset,
+    row,
+    recent_hours,
+    long_hours,
+):
+    spec = dataset.spec
+
+    if long_hours <= recent_hours:
+        raise ValueError(
+            "long_hours must be "
+            "greater than recent_hours."
+        )
+
+    long_case = extract_case(
+        dataset,
+        row,
+        long_hours,
+    )
+
+    target_id = (
+        long_case["entity_id"]
+    )
+
+    case_id = (
+        long_case["case_id"]
+    )
+
+    full_context = (
+        long_case["context"]
+    )
+
+    n_recent = context_steps(
+        recent_hours,
+        spec.resolution_minutes,
+    )
+
+    n_long = context_steps(
+        long_hours,
+        spec.resolution_minutes,
+    )
+
+    n_old = (
+        n_long
+        - n_recent
+    )
+
+    if (
+        len(full_context)
+        != n_long
+    ):
+        raise RuntimeError(
+            f"{case_id}: unexpected "
+            "long-context length."
+        )
+
+    old = (
+        full_context.iloc[
+            :n_old
+        ]
+    )
+
+    recent = (
+        full_context.iloc[
+            n_old:
+        ]
+    )
+
+    recent_values = (
+        recent.to_numpy(
+            dtype=float
+        )
+    )
+
+    (
+        donor_distance,
+        donor_id,
+        donor_recent_values,
+    ) = _find_matched_donor(
+        dataset=dataset,
+        target_id=target_id,
+        recent_index=recent.index,
+        target_recent=recent_values,
+    )
+
+    donor_series = (
+        dataset.series[
+            donor_id
+        ]
+    )
+
+    donor_old = (
+        donor_series.reindex(
+            old.index
+        )
+    )
+
+    if donor_old.isna().any():
+        raise RuntimeError(
+            f"{case_id}: matched donor "
+            f"{donor_id} lacks old history."
+        )
+
+    donor_old_values = (
+        donor_old.to_numpy(
+            dtype=float
+        )
+    )
+
+    _, target_mean, target_std = (
+        _safe_standardize(
+            recent_values
+        )
+    )
+
+    _, donor_mean, donor_std = (
+        _safe_standardize(
+            donor_recent_values
+        )
+    )
+
+    donor_old_affine = (
+        (
+            donor_old_values
+            - donor_mean
+        )
+        / donor_std
+        * target_std
+        + target_mean
+    )
+
+    same_boundary_jump = abs(
+        recent_values[0]
+        - old.to_numpy(dtype=float)[-1]
+    )
+
+    raw_boundary_jump = abs(
+        recent_values[0]
+        - donor_old_values[-1]
+    )
+
+    affine_boundary_jump = abs(
+        recent_values[0]
+        - donor_old_affine[-1]
+    )
+
+    same_boundary_jump_norm = (
+        same_boundary_jump
+        / target_std
+    )
+
+    raw_boundary_jump_norm = (
+        raw_boundary_jump
+        / target_std
+    )
+
+    affine_boundary_jump_norm = (
+        affine_boundary_jump
+        / target_std
+    )
+
+    steps_per_day = int(
+        round(
+            24
+            * 60
+            / spec.resolution_minutes
+        )
+    )
+
+    (
+        shuffled_old,
+        shuffle_order,
+    ) = _shuffle_daily_blocks(
+        old_values=(
+            old.to_numpy(
+                dtype=float
+            )
+        ),
+        steps_per_day=(
+            steps_per_day
+        ),
+        case_id=case_id,
+    )
+
+    conditions = {
+        "short": {
+            "timestamps": (
+                recent.index
+            ),
+            "values": (
+                recent_values
+            ),
+        },
+        "same_entity": {
+            "timestamps": (
+                full_context.index
+            ),
+            "values": (
+                full_context.to_numpy(
+                    dtype=float
+                )
+            ),
+        },
+        "matched_other_raw": {
+            "timestamps": (
+                full_context.index
+            ),
+            "values": np.concatenate(
+                [
+                    donor_old_values,
+                    recent_values,
+                ]
+            ),
+        },
+        "matched_other_affine": {
+            "timestamps": (
+                full_context.index
+            ),
+            "values": np.concatenate(
+                [
+                    donor_old_affine,
+                    recent_values,
+                ]
+            ),
+        },
+        "same_entity_day_shuffle": {
+            "timestamps": (
+                full_context.index
+            ),
+            "values": np.concatenate(
+                [
+                    shuffled_old,
+                    recent_values,
+                ]
+            ),
+        },
+    }
+
+    metadata = {
+        "case_id": case_id,
+        "entity_id": target_id,
+        "eval_index": int(
+            long_case[
+                "eval_index"
+            ]
+        ),
+        "eval_origin": (
+            long_case[
+                "eval_origin"
+            ]
+        ),
+        "donor_id": donor_id,
+        "donor_distance": float(
+            donor_distance
+        ),
+        "same_boundary_jump": float(
+            same_boundary_jump
+        ),
+        "raw_boundary_jump": float(
+            raw_boundary_jump
+        ),
+        "affine_boundary_jump": float(
+            affine_boundary_jump
+        ),
+        "same_boundary_jump_norm": float(
+            same_boundary_jump_norm
+        ),
+        "raw_boundary_jump_norm": float(
+            raw_boundary_jump_norm
+        ),
+        "affine_boundary_jump_norm": float(
+            affine_boundary_jump_norm
+        ),
+        "shuffle_order": ",".join(
+            str(int(x))
+            for x in shuffle_order
+        ),
+    }
+
+    return (
+        conditions,
+        long_case["truth"],
+        metadata,
+    )
+
+
+def _aggregate_intervention(
+    pred,
+):
+    case_metrics = (
+        pred
+        .groupby(
+            [
+                "intervention",
+                "entity_id",
+                "eval_index",
+                "eval_origin",
+                "donor_id",
+            ],
+            as_index=False,
+        )
+        .agg(
+            mae=(
+                "abs_error",
+                "mean",
+            ),
+            mse=(
+                "squared_error",
+                "mean",
+            ),
+            coverage_80=(
+                "covered_80",
+                "mean",
+            ),
+            interval_width_80=(
+                "interval_width_80",
+                "mean",
+            ),
+        )
+    )
+
+    case_metrics["rmse"] = np.sqrt(
+        case_metrics["mse"]
+    )
+
+    case_metrics = (
+        case_metrics.drop(
+            columns="mse"
+        )
+    )
+
+    short = (
+        case_metrics[
+            case_metrics[
+                "intervention"
+            ]
+            == "short"
+        ]
+        [
+            [
+                "entity_id",
+                "eval_index",
+                "mae",
+            ]
+        ]
+        .rename(
+            columns={
+                "mae": "short_mae"
+            }
+        )
+    )
+
+    same = (
+        case_metrics[
+            case_metrics[
+                "intervention"
+            ]
+            == "same_entity"
+        ]
+        [
+            [
+                "entity_id",
+                "eval_index",
+                "mae",
+            ]
+        ]
+        .rename(
+            columns={
+                "mae": "same_mae"
+            }
+        )
+    )
+
+    case_metrics = (
+        case_metrics
+        .merge(
+            short,
+            on=[
+                "entity_id",
+                "eval_index",
+            ],
+            how="left",
+            validate="many_to_one",
+        )
+        .merge(
+            same,
+            on=[
+                "entity_id",
+                "eval_index",
+            ],
+            how="left",
+            validate="many_to_one",
+        )
+    )
+
+    case_metrics[
+        "delta_mae_vs_short"
+    ] = (
+        case_metrics["mae"]
+        - case_metrics["short_mae"]
+    )
+
+    case_metrics[
+        "delta_mae_vs_same"
+    ] = (
+        case_metrics["mae"]
+        - case_metrics["same_mae"]
+    )
+
+    entity_metrics = (
+        case_metrics
+        .groupby(
+            [
+                "intervention",
+                "entity_id",
+            ],
+            as_index=False,
+        )
+        .agg(
+            mean_mae=(
+                "mae",
+                "mean",
+            ),
+            median_mae=(
+                "mae",
+                "median",
+            ),
+            mean_rmse=(
+                "rmse",
+                "mean",
+            ),
+            mean_coverage_80=(
+                "coverage_80",
+                "mean",
+            ),
+            mean_delta_mae_vs_short=(
+                "delta_mae_vs_short",
+                "mean",
+            ),
+            mean_delta_mae_vs_same=(
+                "delta_mae_vs_same",
+                "mean",
+            ),
+        )
+    )
+
+    summary = (
+        entity_metrics
+        .groupby(
+            "intervention",
+            as_index=False,
+        )
+        .agg(
+            n_entities=(
+                "entity_id",
+                "nunique",
+            ),
+            mean_entity_mae=(
+                "mean_mae",
+                "mean",
+            ),
+            median_entity_mae=(
+                "mean_mae",
+                "median",
+            ),
+            mean_entity_rmse=(
+                "mean_rmse",
+                "mean",
+            ),
+            mean_coverage_80=(
+                "mean_coverage_80",
+                "mean",
+            ),
+            mean_delta_mae_vs_short=(
+                "mean_delta_mae_vs_short",
+                "mean",
+            ),
+            mean_delta_mae_vs_same=(
+                "mean_delta_mae_vs_same",
+                "mean",
+            ),
+        )
+    )
+
+    values = {
+        row["intervention"]:
+        float(
+            row[
+                "mean_entity_mae"
+            ]
+        )
+        for _, row in (
+            summary.iterrows()
+        )
+    }
+
+    short_mae = values[
+        "short"
+    ]
+
+    same_mae = values[
+        "same_entity"
+    ]
+
+    total_gain = (
+        short_mae
+        - same_mae
+    )
+
+    summary[
+        "fraction_of_same_entity_gain_retained"
+    ] = np.nan
+
+    if total_gain > 0:
+        summary[
+            "fraction_of_same_entity_gain_retained"
+        ] = (
+            short_mae
+            - summary[
+                "mean_entity_mae"
+            ]
+        ) / total_gain
+
+    summary[
+        "entity_specific_gap_vs_same"
+    ] = (
+        summary[
+            "mean_entity_mae"
+        ]
+        - same_mae
+    )
+
+    return (
+        case_metrics,
+        entity_metrics,
+        summary,
+    )
+
+
+def run_context_intervention(
+    dataset_key,
+    model_key,
+    recent_hours,
+    long_hours,
+    split=None,
+    max_cases=None,
+    one_case_per_entity=False,
+    output_root="results",
+):
+    dataset = load_dataset(
+        dataset_key,
+        split=split,
+    )
+
+    spec = dataset.spec
+
+    if dataset_key != "pems_bay":
+        raise NotImplementedError(
+            "First validated implementation "
+            "is intentionally restricted "
+            "to PEMS-BAY."
+        )
+
+    protocol = (
+        dataset.protocol.copy()
+    )
+
+    if one_case_per_entity:
+        protocol = (
+            protocol
+            .groupby(
+                spec.id_col,
+                group_keys=False,
+            )
+            .head(1)
+            .reset_index(drop=True)
+        )
+
+    if max_cases is not None:
+        protocol = (
+            protocol.iloc[
+                :max_cases
+            ]
+            .copy()
+            .reset_index(
+                drop=True
+            )
+        )
+
+    if model_key == "chronos2":
+        batch_size = (
+            spec.chronos_batch_size
+        )
+    elif model_key == "timesfm3":
+        batch_size = (
+            spec.timesfm_batch_size
+        )
+    else:
+        raise ValueError(
+            f"Unknown model: "
+            f"{model_key}"
+        )
+
+    model = build_model(
+        model_key,
+        batch_size=batch_size,
+    )
+
+    conditions = [
+        "short",
+        "same_entity",
+        "matched_other_raw",
+        "matched_other_affine",
+        "same_entity_day_shuffle",
+    ]
+
+    prepared = {}
+    truth_by_case = {}
+    metadata_rows = []
+
+    for _, row in (
+        protocol.iterrows()
+    ):
+        (
+            case_conditions,
+            truth,
+            metadata,
+        ) = _build_case_conditions(
+            dataset=dataset,
+            row=row,
+            recent_hours=recent_hours,
+            long_hours=long_hours,
+        )
+
+        case_id = metadata[
+            "case_id"
+        ]
+
+        prepared[
+            case_id
+        ] = case_conditions
+
+        truth_by_case[
+            case_id
+        ] = truth
+
+        metadata_rows.append(
+            metadata
+        )
+
+    metadata_df = pd.DataFrame(
+        metadata_rows
+    )
+
+    rows = []
+
+    start_time = time.time()
+
+    for intervention in conditions:
+        print()
+        print("=" * 78)
+        print(
+            f"Intervention: "
+            f"{intervention}"
+        )
+        print("=" * 78)
+
+        if intervention == "short":
+            this_context_hours = (
+                recent_hours
+            )
+        else:
+            this_context_hours = (
+                long_hours
+            )
+
+        n_context_steps = (
+            context_steps(
+                this_context_hours,
+                spec.resolution_minutes,
+            )
+        )
+
+        case_ids = list(
+            prepared.keys()
+        )
+
+        for start in range(
+            0,
+            len(case_ids),
+            batch_size,
+        ):
+            stop = min(
+                start + batch_size,
+                len(case_ids),
+            )
+
+            batch_ids = (
+                case_ids[
+                    start:stop
+                ]
+            )
+
+            inputs = []
+
+            for case_id in batch_ids:
+                item = prepared[
+                    case_id
+                ][
+                    intervention
+                ]
+
+                values = np.asarray(
+                    item["values"],
+                    dtype=float,
+                )
+
+                timestamps = (
+                    pd.DatetimeIndex(
+                        item[
+                            "timestamps"
+                        ]
+                    )
+                )
+
+                if (
+                    len(values)
+                    != n_context_steps
+                ):
+                    raise RuntimeError(
+                        f"{case_id} / "
+                        f"{intervention}: "
+                        "unexpected context "
+                        f"length {len(values)}."
+                    )
+
+                inputs.append(
+                    ForecastInput(
+                        case_id=case_id,
+                        timestamps=timestamps,
+                        values=values,
+                    )
+                )
+
+            outputs = (
+                model.predict_batch(
+                    inputs=inputs,
+                    horizon=(
+                        spec.forecast_steps
+                    ),
+                    resolution_minutes=(
+                        spec.resolution_minutes
+                    ),
+                    context_steps=(
+                        n_context_steps
+                    ),
+                    batch_size=(
+                        batch_size
+                    ),
+                )
+            )
+
+            for output in outputs:
+                case_id = (
+                    output.case_id
+                )
+
+                truth = (
+                    truth_by_case[
+                        case_id
+                    ]
+                )
+
+                meta = (
+                    metadata_df[
+                        metadata_df[
+                            "case_id"
+                        ]
+                        == case_id
+                    ]
+                    .iloc[0]
+                )
+
+                for step in range(
+                    spec.forecast_steps
+                ):
+                    rows.append(
+                        {
+                            "dataset": (
+                                dataset_key
+                            ),
+                            "model": (
+                                model_key
+                            ),
+                            "intervention": (
+                                intervention
+                            ),
+                            "recent_hours": (
+                                recent_hours
+                            ),
+                            "long_hours": (
+                                long_hours
+                            ),
+                            "entity_id": (
+                                meta[
+                                    "entity_id"
+                                ]
+                            ),
+                            "eval_index": int(
+                                meta[
+                                    "eval_index"
+                                ]
+                            ),
+                            "eval_origin": (
+                                meta[
+                                    "eval_origin"
+                                ]
+                            ),
+                            "donor_id": (
+                                meta[
+                                    "donor_id"
+                                ]
+                            ),
+                            "timestamp": (
+                                truth.index[
+                                    step
+                                ]
+                            ),
+                            "truth": float(
+                                truth.iloc[
+                                    step
+                                ]
+                            ),
+                            "prediction": float(
+                                output.prediction[
+                                    step
+                                ]
+                            ),
+                            "q10": float(
+                                output.q10[
+                                    step
+                                ]
+                            ),
+                            "q50": float(
+                                output.q50[
+                                    step
+                                ]
+                            ),
+                            "q90": float(
+                                output.q90[
+                                    step
+                                ]
+                            ),
+                        }
+                    )
+
+            print(
+                f"  cases "
+                f"{start + 1:03d}-"
+                f"{stop:03d}"
+            )
+
+    pred = pd.DataFrame(
+        rows
+    )
+
+    pred, crossing_fraction = (
+        add_prediction_metrics(
+            pred
+        )
+    )
+
+    (
+        case_metrics,
+        entity_metrics,
+        summary,
+    ) = _aggregate_intervention(
+        pred
+    )
+
+    output_dir = (
+        Path(output_root)
+        / dataset_key
+        / "interventions"
+        / model_key
+        / (
+            f"recent_{recent_hours:g}h"
+            f"_long_{long_hours:g}h"
+        )
+    )
+
+    output_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    pred.to_parquet(
+        output_dir
+        / "predictions.parquet",
+        index=False,
+    )
+
+    case_metrics.to_csv(
+        output_dir
+        / "case_metrics.csv",
+        index=False,
+    )
+
+    entity_metrics.to_csv(
+        output_dir
+        / "entity_metrics.csv",
+        index=False,
+    )
+
+    summary.to_csv(
+        output_dir
+        / "summary.csv",
+        index=False,
+    )
+
+    metadata_df.to_csv(
+        output_dir
+        / "donor_manifest.csv",
+        index=False,
+    )
+
+    runtime = (
+        time.time()
+        - start_time
+    )
+
+    print()
+    print("=" * 78)
+    print("Intervention summary")
+    print("=" * 78)
+    print()
+
+    display = summary.copy()
+
+    for column in [
+        "mean_entity_mae",
+        "median_entity_mae",
+        "mean_entity_rmse",
+        "mean_delta_mae_vs_short",
+        "mean_delta_mae_vs_same",
+        "fraction_of_same_entity_gain_retained",
+        "entity_specific_gap_vs_same",
+    ]:
+        display[column] = (
+            display[column]
+            .round(4)
+        )
+
+    print(
+        display.to_string(
+            index=False
+        )
+    )
+
+    print()
+    print(
+        "Quantile crossing: "
+        f"{100 * crossing_fraction:.4f}%"
+    )
+
+    print(
+        "Runtime seconds: "
+        f"{runtime:.2f}"
+    )
+
+    print()
+    print(
+        f"Saved to: "
+        f"{output_dir}"
+    )
+
+    return {
+        "predictions": pred,
+        "case_metrics": (
+            case_metrics
+        ),
+        "entity_metrics": (
+            entity_metrics
+        ),
+        "summary": summary,
+        "donor_manifest": (
+            metadata_df
+        ),
+        "output_dir": (
+            output_dir
+        ),
+    }
