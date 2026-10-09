@@ -138,6 +138,162 @@ def _find_matched_donor(
     return candidates[0]
 
 
+
+def _find_matched_relative_donor(
+    dataset,
+    target_id,
+    target_eval_index,
+    target_recent,
+    long_hours,
+):
+    """
+    Match another entity using relative-time windows.
+
+    Used for datasets such as HUPA-UCM where participants do not
+    necessarily share the same calendar timestamps.
+
+    To avoid cherry-picking across multiple episodes from the same
+    participant, candidate donor windows are restricted to the same
+    frozen evaluation index as the target case.
+    """
+    spec = dataset.spec
+
+    target_z, _, _ = (
+        _safe_standardize(
+            target_recent
+        )
+    )
+
+    n_recent = context_steps(
+        24,
+        spec.resolution_minutes,
+    )
+
+    candidates = []
+
+    donor_protocol = (
+        dataset.protocol[
+            dataset.protocol[
+                "eval_index"
+            ].astype(int)
+            == int(
+                target_eval_index
+            )
+        ]
+    )
+
+    for _, donor_row in (
+        donor_protocol.iterrows()
+    ):
+        donor_case = extract_case(
+            dataset,
+            donor_row,
+            long_hours,
+        )
+
+        donor_id = (
+            donor_case[
+                "entity_id"
+            ]
+        )
+
+        if (
+            str(donor_id)
+            == str(target_id)
+        ):
+            continue
+
+        donor_context = (
+            donor_case[
+                "context"
+            ]
+        )
+
+        donor_recent = (
+            donor_context.iloc[
+                -n_recent:
+            ]
+        )
+
+        donor_old = (
+            donor_context.iloc[
+                :-n_recent
+            ]
+        )
+
+        if (
+            len(donor_recent)
+            != n_recent
+        ):
+            continue
+
+        if (
+            donor_recent.isna().any()
+            or donor_old.isna().any()
+        ):
+            continue
+
+        donor_recent_values = (
+            donor_recent.to_numpy(
+                dtype=float
+            )
+        )
+
+        donor_old_values = (
+            donor_old.to_numpy(
+                dtype=float
+            )
+        )
+
+        donor_z, _, _ = (
+            _safe_standardize(
+                donor_recent_values
+            )
+        )
+
+        distance = float(
+            np.sqrt(
+                np.mean(
+                    (
+                        target_z
+                        - donor_z
+                    )
+                    ** 2
+                )
+            )
+        )
+
+        candidates.append(
+            (
+                distance,
+                str(donor_id),
+                donor_recent_values,
+                donor_old_values,
+                int(
+                    donor_case[
+                        "eval_index"
+                    ]
+                ),
+            )
+        )
+
+    if not candidates:
+        raise RuntimeError(
+            f"No relative-time donor found "
+            f"for {target_id} / "
+            f"eval_index={target_eval_index}."
+        )
+
+    candidates.sort(
+        key=lambda x: (
+            x[0],
+            x[1],
+        )
+    )
+
+    return candidates[0]
+
+
 def _shuffle_daily_blocks(
     old_values,
     steps_per_day,
@@ -204,6 +360,7 @@ def _build_case_conditions(
     row,
     recent_hours,
     long_hours,
+    dataset_key,
 ):
     spec = dataset.spec
 
@@ -273,40 +430,72 @@ def _build_case_conditions(
         )
     )
 
-    (
-        donor_distance,
-        donor_id,
-        donor_recent_values,
-    ) = _find_matched_donor(
-        dataset=dataset,
-        target_id=target_id,
-        recent_index=recent.index,
-        target_recent=recent_values,
-    )
+    donor_eval_index = np.nan
 
-    donor_series = (
-        dataset.series[
-            donor_id
-        ]
-    )
-
-    donor_old = (
-        donor_series.reindex(
-            old.index
-        )
-    )
-
-    if donor_old.isna().any():
-        raise RuntimeError(
-            f"{case_id}: matched donor "
-            f"{donor_id} lacks old history."
+    if dataset_key == "hupa_ucm":
+        (
+            donor_distance,
+            donor_id,
+            donor_recent_values,
+            donor_old_values,
+            donor_eval_index,
+        ) = _find_matched_relative_donor(
+            dataset=dataset,
+            target_id=target_id,
+            target_eval_index=(
+                long_case[
+                    "eval_index"
+                ]
+            ),
+            target_recent=recent_values,
+            long_hours=long_hours,
         )
 
-    donor_old_values = (
-        donor_old.to_numpy(
-            dtype=float
+        if (
+            len(donor_old_values)
+            != n_old
+        ):
+            raise RuntimeError(
+                f"{case_id}: relative donor "
+                "has unexpected old-history "
+                f"length {len(donor_old_values)}."
+            )
+
+    else:
+        (
+            donor_distance,
+            donor_id,
+            donor_recent_values,
+        ) = _find_matched_donor(
+            dataset=dataset,
+            target_id=target_id,
+            recent_index=recent.index,
+            target_recent=recent_values,
         )
-    )
+
+        donor_series = (
+            dataset.series[
+                donor_id
+            ]
+        )
+
+        donor_old = (
+            donor_series.reindex(
+                old.index
+            )
+        )
+
+        if donor_old.isna().any():
+            raise RuntimeError(
+                f"{case_id}: matched donor "
+                f"{donor_id} lacks old history."
+            )
+
+        donor_old_values = (
+            donor_old.to_numpy(
+                dtype=float
+            )
+        )
 
     _, target_mean, target_std = (
         _safe_standardize(
@@ -451,6 +640,9 @@ def _build_case_conditions(
             ]
         ),
         "donor_id": donor_id,
+        "donor_eval_index": (
+            donor_eval_index
+        ),
         "donor_distance": float(
             donor_distance
         ),
@@ -758,12 +950,14 @@ def run_context_intervention(
     supported_datasets = {
         "pems_bay",
         "electricity",
+        "hupa_ucm",
     }
 
     if dataset_key not in supported_datasets:
         raise NotImplementedError(
             "Context interventions are currently "
-            "validated for PEMS-BAY and Electricity."
+            "validated for PEMS-BAY, Electricity, "
+            "and HUPA-UCM."
         )
 
     protocol = (
@@ -835,6 +1029,7 @@ def run_context_intervention(
             row=row,
             recent_hours=recent_hours,
             long_hours=long_hours,
+            dataset_key=dataset_key,
         )
 
         case_id = metadata[
