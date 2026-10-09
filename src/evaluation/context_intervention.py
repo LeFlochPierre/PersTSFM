@@ -755,11 +755,15 @@ def run_context_intervention(
 
     spec = dataset.spec
 
-    if dataset_key != "pems_bay":
+    supported_datasets = {
+        "pems_bay",
+        "electricity",
+    }
+
+    if dataset_key not in supported_datasets:
         raise NotImplementedError(
-            "First validated implementation "
-            "is intentionally restricted "
-            "to PEMS-BAY."
+            "Context interventions are currently "
+            "validated for PEMS-BAY and Electricity."
         )
 
     protocol = (

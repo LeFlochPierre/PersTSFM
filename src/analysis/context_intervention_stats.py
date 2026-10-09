@@ -14,6 +14,11 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
+        "--dataset",
+        required=True,
+    )
+
+    parser.add_argument(
         "--model",
         required=True,
         choices=[
@@ -40,12 +45,10 @@ def parse_args():
 def main():
     args = parse_args()
 
-    root = Path(
-        "results/pems_bay/interventions"
-    )
-
     folder = (
-        root
+        Path("results")
+        / args.dataset
+        / "interventions"
         / args.model
         / (
             f"recent_{args.recent_hours:g}h"
@@ -132,7 +135,7 @@ def main():
 
     print("=" * 88)
     print(
-        "PEMS-BAY context intervention statistics"
+        f"{args.dataset} context intervention statistics"
     )
     print("=" * 88)
 
@@ -309,21 +312,16 @@ def main():
 
         print()
         print(
-            comparison[
-                "name"
-            ]
+            comparison["name"]
         )
-
         print("-" * 88)
 
         print(
-            f"{better} better than "
-            f"{worse}"
+            f"{better} better than {worse}"
         )
 
         print(
-            f"N sensors:             "
-            f"{n}"
+            f"N entities:            {n}"
         )
 
         print(
@@ -343,7 +341,7 @@ def main():
         )
 
         print(
-            "Fraction sensors better: "
+            "Fraction entities better: "
             f"{fraction_better:.3f}"
         )
 
