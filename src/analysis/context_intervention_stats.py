@@ -76,6 +76,28 @@ def main():
         values="mean_mae",
     )
 
+    if (
+        "same_entity_day_shuffle"
+        in wide.columns
+    ):
+        temporal_control = (
+            "same_entity_day_shuffle"
+        )
+
+    elif (
+        "same_entity_block_shuffle"
+        in wide.columns
+    ):
+        temporal_control = (
+            "same_entity_block_shuffle"
+        )
+
+    else:
+        raise RuntimeError(
+            "No temporal-order control "
+            "found in entity_metrics.csv."
+        )
+
     comparisons = [
         {
             "name":
@@ -99,7 +121,7 @@ def main():
             "better":
             "same_entity",
             "worse":
-            "same_entity_day_shuffle",
+            temporal_control,
         },
         {
             "name":
@@ -123,7 +145,7 @@ def main():
             "better":
             "matched_other_affine",
             "worse":
-            "same_entity_day_shuffle",
+            temporal_control,
         },
     ]
 
