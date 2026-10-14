@@ -161,6 +161,75 @@ DATASETS = {
 
         loader_kind="hupa_ucm",
     ),
+    "vitaldb": DatasetSpec(
+        key="vitaldb",
+        id_col="caseid",
+
+        protocol_path=Path(
+            "data/processed/vitaldb/"
+            "vitaldb_context_protocol.csv"
+        ),
+
+        raw_path=Path(
+            "data/processed/vitaldb/"
+            "vitaldb_art_mbp_1min.csv"
+        ),
+
+        default_split="validation",
+
+        resolution_minutes=1,
+        forecast_steps=15,
+
+        context_hours=(
+            0.5,
+            1,
+            2,
+            3,
+            4,
+        ),
+
+        reference_context_hours=0.5,
+
+        chronos_batch_size=64,
+        timesfm_batch_size=64,
+
+        loader_kind="vitaldb",
+    ),
+
+    "solar": DatasetSpec(
+        key="solar",
+        id_col="entity_key",
+
+        protocol_path=Path(
+            "data/processed/solar/"
+            "solar_context_protocol.csv"
+        ),
+
+        raw_path=Path(
+            "data/processed/solar/"
+            "solar_series.csv"
+        ),
+
+        default_split="validation",
+
+        resolution_minutes=10,
+        forecast_steps=6,
+
+        context_hours=(
+            6,
+            12,
+            24,
+            48,
+            96,
+        ),
+
+        reference_context_hours=6,
+
+        chronos_batch_size=32,
+        timesfm_batch_size=16,
+
+        loader_kind="solar",
+    ),
 }
 
 
@@ -537,6 +606,170 @@ def _load_hupa_ucm(
     return result
 
 
+def _load_vitaldb(
+    spec,
+    case_ids,
+):
+    requested = {
+        str(x)
+        for x in case_ids
+    }
+
+    raw = pd.read_csv(
+        spec.raw_path,
+        usecols=[
+            "caseid",
+            "relative_minute",
+            "map",
+        ],
+    )
+
+    raw["caseid"] = (
+        raw["caseid"]
+        .astype(str)
+    )
+
+    raw = raw[
+        raw["caseid"].isin(
+            requested
+        )
+    ].copy()
+
+    base = pd.Timestamp(
+        "2000-01-01 00:00:00"
+    )
+
+    result = {}
+
+    for case_id, part in raw.groupby(
+        "caseid",
+        sort=False,
+    ):
+        part = part.sort_values(
+            "relative_minute"
+        )
+
+        index = (
+            base
+            + pd.to_timedelta(
+                part[
+                    "relative_minute"
+                ],
+                unit="min",
+            )
+        )
+
+        values = pd.to_numeric(
+            part["map"],
+            errors="raise",
+        ).to_numpy(
+            dtype=float
+        )
+
+        result[
+            str(case_id)
+        ] = pd.Series(
+            values,
+            index=pd.DatetimeIndex(
+                index
+            ),
+        )
+
+    missing = (
+        requested
+        - set(result)
+    )
+
+    if missing:
+        raise RuntimeError(
+            "Missing VitalDB cases: "
+            f"{sorted(missing)[:10]}"
+        )
+
+    return result
+
+
+def _load_solar(
+    spec,
+    entity_ids,
+):
+    requested = {
+        str(x)
+        for x in entity_ids
+    }
+
+    raw = pd.read_csv(
+        spec.raw_path,
+        usecols=[
+            "entity_key",
+            "datetime",
+            "value",
+        ],
+    )
+
+    raw["entity_key"] = (
+        raw["entity_key"]
+        .astype(str)
+    )
+
+    raw = raw[
+        raw["entity_key"].isin(
+            requested
+        )
+    ].copy()
+
+    raw["datetime"] = pd.to_datetime(
+        raw["datetime"],
+        errors="raise",
+    )
+
+    result = {}
+
+    for entity_id, part in raw.groupby(
+        "entity_key",
+        sort=False,
+    ):
+        part = (
+            part
+            .sort_values(
+                "datetime"
+            )
+            .drop_duplicates(
+                subset="datetime",
+                keep="first",
+            )
+        )
+
+        values = pd.to_numeric(
+            part["value"],
+            errors="raise",
+        ).to_numpy(
+            dtype=float
+        )
+
+        result[
+            str(entity_id)
+        ] = pd.Series(
+            values,
+            index=pd.DatetimeIndex(
+                part["datetime"]
+            ),
+        )
+
+    missing = (
+        requested
+        - set(result)
+    )
+
+    if missing:
+        raise RuntimeError(
+            "Missing Solar entities: "
+            f"{sorted(missing)[:10]}"
+        )
+
+    return result
+
+
 # ---------------------------------------------------------------------
 # Dataset loading
 # ---------------------------------------------------------------------
@@ -588,6 +821,28 @@ def load_dataset(
     ):
         series = (
             _load_hupa_ucm(
+                spec,
+                ids,
+            )
+        )
+
+    elif (
+        spec.loader_kind
+        == "vitaldb"
+    ):
+        series = (
+            _load_vitaldb(
+                spec,
+                ids,
+            )
+        )
+
+    elif (
+        spec.loader_kind
+        == "solar"
+    ):
+        series = (
+            _load_solar(
                 spec,
                 ids,
             )

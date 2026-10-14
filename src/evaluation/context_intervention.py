@@ -139,22 +139,22 @@ def _find_matched_donor(
 
 
 
+
 def _find_matched_relative_donor(
     dataset,
     target_id,
     target_eval_index,
     target_recent,
+    recent_hours,
     long_hours,
+    target_region=None,
 ):
     """
     Match another entity using relative-time windows.
 
-    Used for datasets such as HUPA-UCM where participants do not
-    necessarily share the same calendar timestamps.
-
-    To avoid cherry-picking across multiple episodes from the same
-    participant, candidate donor windows are restricted to the same
-    frozen evaluation index as the target case.
+    Candidate donors are restricted to the same frozen evaluation
+    index as the target. For grouped datasets such as Solar, an
+    optional region restriction can also be applied.
     """
     spec = dataset.spec
 
@@ -165,7 +165,7 @@ def _find_matched_relative_donor(
     )
 
     n_recent = context_steps(
-        24,
+        recent_hours,
         spec.resolution_minutes,
     )
 
@@ -180,7 +180,24 @@ def _find_matched_relative_donor(
                 target_eval_index
             )
         ]
+        .copy()
     )
+
+    if (
+        target_region is not None
+        and "region"
+        in donor_protocol.columns
+    ):
+        donor_protocol = (
+            donor_protocol[
+                donor_protocol[
+                    "region"
+                ].astype(str)
+                == str(
+                    target_region
+                )
+            ]
+        )
 
     for _, donor_row in (
         donor_protocol.iterrows()
@@ -278,10 +295,19 @@ def _find_matched_relative_donor(
         )
 
     if not candidates:
-        raise RuntimeError(
+        message = (
             f"No relative-time donor found "
             f"for {target_id} / "
-            f"eval_index={target_eval_index}."
+            f"eval_index={target_eval_index}"
+        )
+
+        if target_region is not None:
+            message += (
+                f" / region={target_region}"
+            )
+
+        raise RuntimeError(
+            message + "."
         )
 
     candidates.sort(
@@ -294,9 +320,10 @@ def _find_matched_relative_donor(
     return candidates[0]
 
 
-def _shuffle_daily_blocks(
+
+def _shuffle_temporal_blocks(
     old_values,
-    steps_per_day,
+    block_steps,
     case_id,
 ):
     old_values = np.asarray(
@@ -304,25 +331,40 @@ def _shuffle_daily_blocks(
         dtype=float,
     )
 
+    block_steps = int(
+        block_steps
+    )
+
+    if block_steps <= 0:
+        raise ValueError(
+            "block_steps must be positive."
+        )
+
     if (
         len(old_values)
-        % steps_per_day
+        % block_steps
         != 0
     ):
         raise RuntimeError(
-            "Old-history length is "
-            "not divisible into days."
+            "Old-history length is not "
+            "divisible by shuffle block size."
         )
 
     n_blocks = (
         len(old_values)
-        // steps_per_day
+        // block_steps
     )
+
+    if n_blocks < 2:
+        raise RuntimeError(
+            "Need at least two temporal "
+            "blocks to shuffle."
+        )
 
     blocks = (
         old_values.reshape(
             n_blocks,
-            steps_per_day,
+            block_steps,
         )
     )
 
@@ -353,6 +395,22 @@ def _shuffle_daily_blocks(
     )
 
     return shuffled, order
+
+
+def _shuffle_daily_blocks(
+    old_values,
+    steps_per_day,
+    case_id,
+):
+    """
+    Backwards-compatible daily-block wrapper.
+    """
+    return _shuffle_temporal_blocks(
+        old_values=old_values,
+        block_steps=steps_per_day,
+        case_id=case_id,
+    )
+
 
 
 def _build_case_conditions(
@@ -432,7 +490,30 @@ def _build_case_conditions(
 
     donor_eval_index = np.nan
 
-    if dataset_key == "hupa_ucm":
+    # ------------------------------------------------------------
+    # Donor selection
+    # ------------------------------------------------------------
+
+    relative_donor_datasets = {
+        "hupa_ucm",
+        "vitaldb",
+        "solar",
+    }
+
+    if (
+        dataset_key
+        in relative_donor_datasets
+    ):
+        target_region = None
+
+        if (
+            dataset_key == "solar"
+            and "region" in row.index
+        ):
+            target_region = (
+                row["region"]
+            )
+
         (
             donor_distance,
             donor_id,
@@ -448,7 +529,9 @@ def _build_case_conditions(
                 ]
             ),
             target_recent=recent_values,
+            recent_hours=recent_hours,
             long_hours=long_hours,
+            target_region=target_region,
         )
 
         if (
@@ -458,7 +541,8 @@ def _build_case_conditions(
             raise RuntimeError(
                 f"{case_id}: relative donor "
                 "has unexpected old-history "
-                f"length {len(donor_old_values)}."
+                f"length "
+                f"{len(donor_old_values)}."
             )
 
     else:
@@ -497,6 +581,10 @@ def _build_case_conditions(
             )
         )
 
+    # ------------------------------------------------------------
+    # Affine donor normalization
+    # ------------------------------------------------------------
+
     _, target_mean, target_std = (
         _safe_standardize(
             recent_values
@@ -519,9 +607,15 @@ def _build_case_conditions(
         + target_mean
     )
 
+    # ------------------------------------------------------------
+    # Boundary diagnostics
+    # ------------------------------------------------------------
+
     same_boundary_jump = abs(
         recent_values[0]
-        - old.to_numpy(dtype=float)[-1]
+        - old.to_numpy(
+            dtype=float
+        )[-1]
     )
 
     raw_boundary_jump = abs(
@@ -549,28 +643,58 @@ def _build_case_conditions(
         / target_std
     )
 
-    steps_per_day = int(
-        round(
-            24
-            * 60
-            / spec.resolution_minutes
+    # ------------------------------------------------------------
+    # Temporal-order intervention
+    # ------------------------------------------------------------
+
+    if dataset_key == "vitaldb":
+        # Acute physiology has no meaningful
+        # 24-hour block inside a 4-hour context.
+        # Shuffle 30-minute blocks instead.
+        shuffle_block_hours = (
+            recent_hours
         )
-    )
+
+        shuffle_block_steps = (
+            n_recent
+        )
+
+        shuffle_intervention = (
+            "same_entity_block_shuffle"
+        )
+
+    else:
+        shuffle_block_hours = 24.0
+
+        shuffle_block_steps = (
+            context_steps(
+                24,
+                spec.resolution_minutes,
+            )
+        )
+
+        shuffle_intervention = (
+            "same_entity_day_shuffle"
+        )
 
     (
         shuffled_old,
         shuffle_order,
-    ) = _shuffle_daily_blocks(
+    ) = _shuffle_temporal_blocks(
         old_values=(
             old.to_numpy(
                 dtype=float
             )
         ),
-        steps_per_day=(
-            steps_per_day
+        block_steps=(
+            shuffle_block_steps
         ),
         case_id=case_id,
     )
+
+    # ------------------------------------------------------------
+    # Conditions
+    # ------------------------------------------------------------
 
     conditions = {
         "short": {
@@ -613,7 +737,7 @@ def _build_case_conditions(
                 ]
             ),
         },
-        "same_entity_day_shuffle": {
+        shuffle_intervention: {
             "timestamps": (
                 full_context.index
             ),
@@ -663,6 +787,12 @@ def _build_case_conditions(
         ),
         "affine_boundary_jump_norm": float(
             affine_boundary_jump_norm
+        ),
+        "shuffle_intervention": (
+            shuffle_intervention
+        ),
+        "shuffle_block_hours": float(
+            shuffle_block_hours
         ),
         "shuffle_order": ",".join(
             str(int(x))
@@ -951,13 +1081,15 @@ def run_context_intervention(
         "pems_bay",
         "electricity",
         "hupa_ucm",
+        "vitaldb",
+        "solar",
     }
 
     if dataset_key not in supported_datasets:
         raise NotImplementedError(
             "Context interventions are currently "
             "validated for PEMS-BAY, Electricity, "
-            "and HUPA-UCM."
+            "HUPA-UCM, VitalDB, and Solar."
         )
 
     protocol = (
@@ -1005,12 +1137,21 @@ def run_context_intervention(
         batch_size=batch_size,
     )
 
+    if dataset_key == "vitaldb":
+        shuffle_condition = (
+            "same_entity_block_shuffle"
+        )
+    else:
+        shuffle_condition = (
+            "same_entity_day_shuffle"
+        )
+
     conditions = [
         "short",
         "same_entity",
         "matched_other_raw",
         "matched_other_affine",
-        "same_entity_day_shuffle",
+        shuffle_condition,
     ]
 
     prepared = {}
