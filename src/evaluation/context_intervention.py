@@ -148,13 +148,17 @@ def _find_matched_relative_donor(
     recent_hours,
     long_hours,
     target_region=None,
+    target_source_set=None,
 ):
     """
     Match another entity using relative-time windows.
 
     Candidate donors are restricted to the same frozen evaluation
-    index as the target. For grouped datasets such as Solar, an
-    optional region restriction can also be applied.
+    index as the target.
+
+    Optional grouping restrictions are used where required:
+    Solar -> same region;
+    PhysioNet 2019 -> same source set (A/B).
     """
     spec = dataset.spec
 
@@ -199,6 +203,22 @@ def _find_matched_relative_donor(
             ]
         )
 
+    if (
+        target_source_set is not None
+        and "source_set"
+        in donor_protocol.columns
+    ):
+        donor_protocol = (
+            donor_protocol[
+                donor_protocol[
+                    "source_set"
+                ].astype(str)
+                == str(
+                    target_source_set
+                )
+            ]
+        )
+
     for _, donor_row in (
         donor_protocol.iterrows()
     ):
@@ -226,17 +246,36 @@ def _find_matched_relative_donor(
             ]
         )
 
-        donor_recent = (
-            donor_context.iloc[
-                -n_recent:
-            ]
-        )
-
         donor_old = (
             donor_context.iloc[
                 :-n_recent
             ]
         )
+
+        if (
+            dataset.spec.key
+            == "physionet2019"
+        ):
+            donor_recent_case = (
+                extract_case(
+                    dataset,
+                    donor_row,
+                    recent_hours,
+                )
+            )
+
+            donor_recent = (
+                donor_recent_case[
+                    "context"
+                ]
+            )
+
+        else:
+            donor_recent = (
+                donor_context.iloc[
+                    -n_recent:
+                ]
+            )
 
         if (
             len(donor_recent)
@@ -304,6 +343,12 @@ def _find_matched_relative_donor(
         if target_region is not None:
             message += (
                 f" / region={target_region}"
+            )
+
+        if target_source_set is not None:
+            message += (
+                f" / source_set="
+                f"{target_source_set}"
             )
 
         raise RuntimeError(
@@ -434,6 +479,15 @@ def _build_case_conditions(
         long_hours,
     )
 
+    recent_case = None
+
+    if dataset_key == "physionet2019":
+        recent_case = extract_case(
+            dataset,
+            row,
+            recent_hours,
+        )
+
     target_id = (
         long_case["entity_id"]
     )
@@ -476,11 +530,19 @@ def _build_case_conditions(
         ]
     )
 
-    recent = (
-        full_context.iloc[
-            n_old:
-        ]
-    )
+    if dataset_key == "physionet2019":
+        recent = (
+            recent_case[
+                "context"
+            ]
+        )
+
+    else:
+        recent = (
+            full_context.iloc[
+                n_old:
+            ]
+        )
 
     recent_values = (
         recent.to_numpy(
@@ -498,6 +560,7 @@ def _build_case_conditions(
         "hupa_ucm",
         "vitaldb",
         "solar",
+        "physionet2019",
     }
 
     if (
@@ -505,6 +568,7 @@ def _build_case_conditions(
         in relative_donor_datasets
     ):
         target_region = None
+        target_source_set = None
 
         if (
             dataset_key == "solar"
@@ -512,6 +576,18 @@ def _build_case_conditions(
         ):
             target_region = (
                 row["region"]
+            )
+
+        if (
+            dataset_key
+            == "physionet2019"
+            and "source_set"
+            in row.index
+        ):
+            target_source_set = (
+                row[
+                    "source_set"
+                ]
             )
 
         (
@@ -532,6 +608,9 @@ def _build_case_conditions(
             recent_hours=recent_hours,
             long_hours=long_hours,
             target_region=target_region,
+            target_source_set=(
+                target_source_set
+            ),
         )
 
         if (
@@ -647,10 +726,16 @@ def _build_case_conditions(
     # Temporal-order intervention
     # ------------------------------------------------------------
 
-    if dataset_key == "vitaldb":
-        # Acute physiology has no meaningful
-        # 24-hour block inside a 4-hour context.
-        # Shuffle 30-minute blocks instead.
+    if dataset_key in {
+        "vitaldb",
+        "physionet2019",
+    }:
+        # Acute physiology uses blocks matched
+        # to the recent-context duration rather
+        # than 24-hour day blocks.
+        #
+        # VitalDB:     0.5 h blocks
+        # PhysioNet:   6 h blocks
         shuffle_block_hours = (
             recent_hours
         )
@@ -696,6 +781,24 @@ def _build_case_conditions(
     # Conditions
     # ------------------------------------------------------------
 
+    same_entity_values = (
+        full_context.to_numpy(
+            dtype=float
+        )
+    )
+
+    if dataset_key == "physionet2019":
+        same_entity_values = (
+            np.concatenate(
+                [
+                    old.to_numpy(
+                        dtype=float
+                    ),
+                    recent_values,
+                ]
+            )
+        )
+
     conditions = {
         "short": {
             "timestamps": (
@@ -710,9 +813,7 @@ def _build_case_conditions(
                 full_context.index
             ),
             "values": (
-                full_context.to_numpy(
-                    dtype=float
-                )
+                same_entity_values
             ),
         },
         "matched_other_raw": {
@@ -1083,13 +1184,15 @@ def run_context_intervention(
         "hupa_ucm",
         "vitaldb",
         "solar",
+        "physionet2019",
     }
 
     if dataset_key not in supported_datasets:
         raise NotImplementedError(
             "Context interventions are currently "
             "validated for PEMS-BAY, Electricity, "
-            "HUPA-UCM, VitalDB, and Solar."
+            "HUPA-UCM, VitalDB, Solar, and "
+            "PhysioNet 2019."
         )
 
     protocol = (
@@ -1137,7 +1240,10 @@ def run_context_intervention(
         batch_size=batch_size,
     )
 
-    if dataset_key == "vitaldb":
+    if dataset_key in {
+        "vitaldb",
+        "physionet2019",
+    }:
         shuffle_condition = (
             "same_entity_block_shuffle"
         )

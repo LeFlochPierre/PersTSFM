@@ -87,6 +87,19 @@ CONFIGS = [
         "recent_hours": 24,
         "long_hours": 96,
     },
+
+    {
+        "dataset": "physionet2019",
+        "model": "chronos2",
+        "recent_hours": 6,
+        "long_hours": 48,
+    },
+    {
+        "dataset": "physionet2019",
+        "model": "timesfm3",
+        "recent_hours": 6,
+        "long_hours": 48,
+    },
 ]
 
 

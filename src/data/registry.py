@@ -230,6 +230,41 @@ DATASETS = {
 
         loader_kind="solar",
     ),
+
+    "physionet2019": DatasetSpec(
+        key="physionet2019",
+        id_col="entity",
+
+        protocol_path=Path(
+            "data/processed/physionet2019/"
+            "physionet2019_context_protocol.csv"
+        ),
+
+        raw_path=Path(
+            "data/processed/physionet2019/"
+            "physionet2019_series.csv"
+        ),
+
+        default_split="validation",
+
+        resolution_minutes=60,
+        forecast_steps=6,
+
+        context_hours=(
+            6,
+            12,
+            24,
+            36,
+            48,
+        ),
+
+        reference_context_hours=6,
+
+        chronos_batch_size=64,
+        timesfm_batch_size=64,
+
+        loader_kind="physionet2019",
+    ),
 }
 
 
@@ -770,6 +805,101 @@ def _load_solar(
     return result
 
 
+def _load_physionet2019(
+    spec,
+    entity_ids,
+):
+    requested = {
+        str(x)
+        for x in entity_ids
+    }
+
+    raw = pd.read_csv(
+        spec.raw_path,
+        usecols=[
+            "entity",
+            "hour",
+            "value",
+        ],
+    )
+
+    raw["entity"] = (
+        raw["entity"]
+        .astype(str)
+    )
+
+    raw = raw[
+        raw["entity"].isin(
+            requested
+        )
+    ].copy()
+
+    base = pd.Timestamp(
+        "2000-01-01 00:00:00"
+    )
+
+    result = {}
+
+    for entity_id, part in raw.groupby(
+        "entity",
+        sort=False,
+    ):
+        part = (
+            part
+            .sort_values(
+                "hour"
+            )
+            .drop_duplicates(
+                subset="hour",
+                keep="first",
+            )
+        )
+
+        hours = pd.to_numeric(
+            part["hour"],
+            errors="raise",
+        ).to_numpy(
+            dtype=int
+        )
+
+        values = pd.to_numeric(
+            part["value"],
+            errors="coerce",
+        ).to_numpy(
+            dtype=float
+        )
+
+        index = (
+            base
+            + pd.to_timedelta(
+                hours,
+                unit="h",
+            )
+        )
+
+        result[
+            str(entity_id)
+        ] = pd.Series(
+            values,
+            index=pd.DatetimeIndex(
+                index
+            ),
+        )
+
+    missing = (
+        requested
+        - set(result)
+    )
+
+    if missing:
+        raise RuntimeError(
+            "Missing PhysioNet entities: "
+            f"{sorted(missing)[:10]}"
+        )
+
+    return result
+
+
 # ---------------------------------------------------------------------
 # Dataset loading
 # ---------------------------------------------------------------------
@@ -843,6 +973,17 @@ def load_dataset(
     ):
         series = (
             _load_solar(
+                spec,
+                ids,
+            )
+        )
+
+    elif (
+        spec.loader_kind
+        == "physionet2019"
+    ):
+        series = (
+            _load_physionet2019(
                 spec,
                 ids,
             )
@@ -947,6 +1088,49 @@ def extract_case(
             f"target points, "
             f"found {len(truth)}."
         )
+
+    # -------------------------------------------------------------
+    # PhysioNet HR missingness
+    # -------------------------------------------------------------
+    #
+    # Impute only after the requested context window has been
+    # extracted. Therefore a 6 h forecast never receives information
+    # from observations outside its 6 h context.
+    #
+    # Forward fill handles internal/trailing gaps. Any leading gaps
+    # are back-filled from the first observed HR value inside the
+    # same context window.
+    if spec.loader_kind == "physionet2019":
+        if truth.isna().any():
+            raise RuntimeError(
+                f"{spec.key} / "
+                f"{entity_id} / "
+                f"eval {row['eval_index']}: "
+                "target contains missing HR."
+            )
+
+        if context.notna().sum() == 0:
+            raise RuntimeError(
+                f"{spec.key} / "
+                f"{entity_id} / "
+                f"eval {row['eval_index']}: "
+                f"{context_hours_value} h "
+                "context contains no observed HR."
+            )
+
+        context = (
+            context
+            .ffill()
+            .bfill()
+        )
+
+        if context.isna().any():
+            raise RuntimeError(
+                f"{spec.key} / "
+                f"{entity_id} / "
+                f"eval {row['eval_index']}: "
+                "context imputation left NaNs."
+            )
 
     case_id = (
         f"{entity_id}__"
