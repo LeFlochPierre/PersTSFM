@@ -368,6 +368,229 @@ class TimesFM3Model(
 
 
 # ---------------------------------------------------------------------
+# TiRex-2
+# ---------------------------------------------------------------------
+
+class TiRex2Model(
+    ForecastModel
+):
+
+    name = "tirex2"
+
+    def __init__(
+        self,
+        model_id="NX-AI/TiRex-2",
+    ):
+        from tirex2 import (
+            TimeseriesType,
+            load_model,
+        )
+
+        self.model_id = model_id
+        self.TimeseriesType = TimeseriesType
+
+        device = (
+            "cuda"
+            if torch.cuda.is_available()
+            else "cpu"
+        )
+
+        self.device = device
+
+        self.model = load_model(
+            model_id,
+            device=device,
+        )
+
+        self.max_context_steps = 2048
+
+    def predict_batch(
+        self,
+        inputs,
+        horizon,
+        resolution_minutes,
+        context_steps,
+        batch_size,
+    ):
+        del resolution_minutes
+
+        outputs = []
+
+        for start in range(
+            0,
+            len(inputs),
+            batch_size,
+        ):
+            chunk = inputs[
+                start:start + batch_size
+            ]
+
+            series = []
+
+            for item in chunk:
+
+                values = np.asarray(
+                    item.values,
+                    dtype=np.float32,
+                ).reshape(-1)
+
+                if (
+                    context_steps is not None
+                    and context_steps
+                    > self.max_context_steps
+                ):
+                    raise RuntimeError(
+                        f"{item.case_id}: "
+                        f"TiRex-2 supports at most "
+                        f"{self.max_context_steps} "
+                        f"context steps, but "
+                        f"{context_steps} were requested."
+                    )
+
+                if (
+                    context_steps is not None
+                    and len(values) > context_steps
+                ):
+                    values = values[
+                        -context_steps:
+                    ]
+
+                if not np.isfinite(
+                    values
+                ).all():
+                    raise RuntimeError(
+                        f"{item.case_id}: "
+                        "TiRex context contains "
+                        "non-finite values."
+                    )
+
+                target = (
+                    torch
+                    .from_numpy(values)
+                    .unsqueeze(0)
+                )
+
+                series.append(
+                    self.TimeseriesType(
+                        target=target,
+                        past_covariates=None,
+                        future_covariates=None,
+                    )
+                )
+
+            raw_outputs = (
+                self.model.forecast(
+                    series,
+                    prediction_length=horizon,
+                    output_type="numpy",
+                )
+            )
+
+            if (
+                len(raw_outputs)
+                != len(chunk)
+            ):
+                raise RuntimeError(
+                    "TiRex returned "
+                    f"{len(raw_outputs)} "
+                    "outputs for "
+                    f"{len(chunk)} inputs."
+                )
+
+            for item, raw in zip(
+                chunk,
+                raw_outputs,
+            ):
+
+                arr = np.asarray(
+                    raw,
+                    dtype=float,
+                )
+
+                if arr.shape == (
+                    1,
+                    9,
+                    horizon,
+                ):
+                    quantiles = arr[0]
+
+                elif arr.shape == (
+                    9,
+                    horizon,
+                ):
+                    quantiles = arr
+
+                else:
+                    raise RuntimeError(
+                        f"{item.case_id}: "
+                        "unexpected TiRex "
+                        "forecast shape "
+                        f"{arr.shape}; "
+                        "expected "
+                        f"(1, 9, {horizon}) "
+                        "or "
+                        f"(9, {horizon})."
+                    )
+
+                q10 = np.asarray(
+                    quantiles[0],
+                    dtype=float,
+                )
+
+                q50 = np.asarray(
+                    quantiles[4],
+                    dtype=float,
+                )
+
+                q90 = np.asarray(
+                    quantiles[8],
+                    dtype=float,
+                )
+
+                for name, values_out in [
+                    ("q10", q10),
+                    ("q50", q50),
+                    ("q90", q90),
+                ]:
+                    if values_out.shape != (
+                        horizon,
+                    ):
+                        raise RuntimeError(
+                            f"{item.case_id}: "
+                            f"unexpected TiRex "
+                            f"{name} shape "
+                            f"{values_out.shape}."
+                        )
+
+                    if not np.isfinite(
+                        values_out
+                    ).all():
+                        raise RuntimeError(
+                            f"{item.case_id}: "
+                            f"TiRex {name} "
+                            "contains non-finite "
+                            "values."
+                        )
+
+                outputs.append(
+                    ForecastOutput(
+                        case_id=(
+                            item.case_id
+                        ),
+                        prediction=(
+                            q50.copy()
+                        ),
+                        q10=q10,
+                        q50=q50,
+                        q90=q90,
+                    )
+                )
+
+        return outputs
+
+
+
+# ---------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------
 
@@ -383,9 +606,12 @@ def build_model(
             batch_size=batch_size
         )
 
+    if model_key == "tirex2":
+        return TiRex2Model()
+
     raise ValueError(
         f"Unknown model "
         f"'{model_key}'. "
         "Available models: "
-        "chronos2, timesfm3"
+        "chronos2, timesfm3, tirex2"
     )

@@ -31,6 +31,7 @@ def parse_args():
         choices=[
             "chronos2",
             "timesfm3",
+            "tirex2",
         ],
     )
 

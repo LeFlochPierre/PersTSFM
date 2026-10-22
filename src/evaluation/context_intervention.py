@@ -1229,6 +1229,10 @@ def run_context_intervention(
         batch_size = (
             spec.timesfm_batch_size
         )
+
+    elif model_key == "tirex2":
+        batch_size = 8
+
     else:
         raise ValueError(
             f"Unknown model: "

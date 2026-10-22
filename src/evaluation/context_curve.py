@@ -91,6 +91,9 @@ def run_context_curve(
             spec.timesfm_batch_size
         )
 
+    elif model_key == "tirex2":
+        batch_size = 8
+
     else:
         raise ValueError(
             f"Unknown model: {model_key}"
