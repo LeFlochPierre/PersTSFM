@@ -1,7 +1,0 @@
-dataset,model,reference_context_hours,reference_context_label,reference_mae,best_context_hours,best_context_label,best_mae,improvement_pct,l1_context_hours,l1_context_label,l2_context_hours,l2_context_label,max_context_hours,max_context_label,right_censored
-Electricity,Chronos-2,96,4d,22.320740353611857,288.0,12d,19.761063122319275,11.46770757036464,192.0,8d,168.0,7d,744.0,31d,False
-Electricity,TimesFM 3,96,4d,25.0202387427903,240.0,10d,21.018834052828826,15.992671896923842,240.0,10d,216.0,9d,744.0,31d,False
-PEMS-BAY,Chronos-2,24,1d,2.516714981056395,336.0,14d,1.5223737312011976,39.50948984448852,240.0,10d,240.0,10d,672.0,28d,False
-PEMS-BAY,TimesFM 3,24,1d,2.21505535240887,672.0,28d,1.306030454522087,41.038473232653956,504.0,21d,240.0,10d,672.0,28d,True
-HUPA-UCM,Chronos-2,24,1d,14.686514797245032,96.0,4d,13.646965266427909,7.078258832463959,96.0,4d,96.0,4d,168.0,7d,False
-HUPA-UCM,TimesFM 3,24,1d,14.504788321161849,168.0,7d,13.638055200970197,5.9754965119148045,168.0,7d,168.0,7d,168.0,7d,True
