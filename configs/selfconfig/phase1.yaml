@@ -1,0 +1,21 @@
+phase: 1
+metric: mae
+models:
+  - chronos2
+  - timesfm3
+  - tirex2
+context_multipliers: [1, 2, 4, 8, 16]
+model_max_context_steps:
+  chronos2: null
+  timesfm3: null
+  tirex2: 2048
+fingerprint:
+  max_series: 256
+  max_points_per_series: 8192
+  seed: 42
+rules:
+  strong_seasonality_threshold: 0.50
+  high_horizon_acf_threshold: 0.30
+  low_horizon_acf_threshold: 0.10
+  low_seasonality_threshold: 0.20
+  candidates_per_model: 3

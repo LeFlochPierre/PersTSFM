@@ -1,0 +1,14 @@
+{
+  "acf_16h": NaN,
+  "acf_2h": -0.04256592218753278,
+  "acf_2period": -0.002528388872764597,
+  "acf_32h": NaN,
+  "acf_4h": -0.002528388872764597,
+  "acf_8h": -0.1898071933985331,
+  "acf_h": 0.17567072026135386,
+  "acf_period": -0.04256592218753278,
+  "memory_lag_01_seconds": 172800.0,
+  "memory_lag_01_steps": 48,
+  "memory_lag_02_seconds": null,
+  "memory_lag_02_steps": null
+}

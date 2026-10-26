@@ -1,0 +1,14 @@
+{
+  "adjacent_mean_shift": 0.9109966131728946,
+  "median_windows_per_series": 4.0,
+  "profile_window_steps": 24,
+  "recent_vs_prior_iqr_shift": 1.1786549946108769,
+  "recent_vs_prior_mean_shift": 0.9174744663159585,
+  "recent_vs_prior_quantile_shift": 0.39487179487179463,
+  "recent_vs_prior_scale_shift": 0.8668231077823888,
+  "recent_window_steps": 24,
+  "rolling_mean_variability": 0.8268403183552239,
+  "rolling_scale_variability": 0.3896247942841929,
+  "usable_series_fraction": 1.0,
+  "window_mean_persistence": 0.6571655233400494
+}

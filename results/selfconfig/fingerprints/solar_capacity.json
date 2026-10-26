@@ -1,0 +1,14 @@
+{
+  "effective_limit_horizons": 95.83333333333333,
+  "effective_limit_steps": 575,
+  "horizon_steps": 6,
+  "max_steps": 575,
+  "median_steps": 575,
+  "min_steps": 575,
+  "p10_steps": 575,
+  "p25_steps": 575,
+  "p75_steps": 575,
+  "p90_steps": 575,
+  "resource_limit_steps": 4096,
+  "robust_history_limit_steps": 575
+}

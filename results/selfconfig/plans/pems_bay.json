@@ -1,0 +1,282 @@
+{
+  "dataset_name": "pems_bay",
+  "fingerprint": {
+    "acf_horizon": 0.6295003270539942,
+    "acf_lag1": 0.9737681293207205,
+    "between_series_acf_variability": 0.03658865876321166,
+    "between_series_mean_variability": 0.03671315369453252,
+    "between_series_scale_variability": 0.399650702325946,
+    "coefficient_of_variation": 0.12104262661320807,
+    "constant_series_fraction": 0.0,
+    "dataset_name": "pems_bay",
+    "dominant_period_seconds": 87771.42857142857,
+    "dominant_period_steps": 292.57142857142856,
+    "excess_kurtosis": 15.65760580260234,
+    "forecast_horizon_seconds": 3600.0,
+    "forecast_horizon_steps": 12,
+    "max_series_length": 30588,
+    "median_series_length": 30588.0,
+    "min_series_length": 30588,
+    "missing_fraction": 0.0,
+    "n_series": 49,
+    "n_variables": 1,
+    "sampling_interval_seconds": 300.0,
+    "seasonality_strength": 0.3851230010538069,
+    "skewness": -3.61399612411306,
+    "spectral_entropy": 0.5560408589362287,
+    "trend_strength": 0.009988981392255123,
+    "value_iqr": 4.6000000000000085,
+    "value_median": 65.2,
+    "zero_fraction": 0.0
+  },
+  "full_candidates": [
+    {
+      "context_multiplier": 1.0,
+      "context_steps": 12,
+      "model": "chronos2"
+    },
+    {
+      "context_multiplier": 2.0,
+      "context_steps": 24,
+      "model": "chronos2"
+    },
+    {
+      "context_multiplier": 4.0,
+      "context_steps": 48,
+      "model": "chronos2"
+    },
+    {
+      "context_multiplier": 8.0,
+      "context_steps": 96,
+      "model": "chronos2"
+    },
+    {
+      "context_multiplier": 16.0,
+      "context_steps": 192,
+      "model": "chronos2"
+    },
+    {
+      "context_multiplier": 24.416666666666668,
+      "context_steps": 293,
+      "model": "chronos2"
+    },
+    {
+      "context_multiplier": 32.0,
+      "context_steps": 384,
+      "model": "chronos2"
+    },
+    {
+      "context_multiplier": 48.833333333333336,
+      "context_steps": 586,
+      "model": "chronos2"
+    },
+    {
+      "context_multiplier": 64.0,
+      "context_steps": 768,
+      "model": "chronos2"
+    },
+    {
+      "context_multiplier": 97.66666666666667,
+      "context_steps": 1172,
+      "model": "chronos2"
+    },
+    {
+      "context_multiplier": 128.0,
+      "context_steps": 1536,
+      "model": "chronos2"
+    },
+    {
+      "context_multiplier": 195.33333333333334,
+      "context_steps": 2344,
+      "model": "chronos2"
+    },
+    {
+      "context_multiplier": 256.0,
+      "context_steps": 3072,
+      "model": "chronos2"
+    },
+    {
+      "context_multiplier": 341.3333333333333,
+      "context_steps": 4096,
+      "model": "chronos2"
+    },
+    {
+      "context_multiplier": 1.0,
+      "context_steps": 12,
+      "model": "timesfm3"
+    },
+    {
+      "context_multiplier": 2.0,
+      "context_steps": 24,
+      "model": "timesfm3"
+    },
+    {
+      "context_multiplier": 4.0,
+      "context_steps": 48,
+      "model": "timesfm3"
+    },
+    {
+      "context_multiplier": 8.0,
+      "context_steps": 96,
+      "model": "timesfm3"
+    },
+    {
+      "context_multiplier": 16.0,
+      "context_steps": 192,
+      "model": "timesfm3"
+    },
+    {
+      "context_multiplier": 24.416666666666668,
+      "context_steps": 293,
+      "model": "timesfm3"
+    },
+    {
+      "context_multiplier": 32.0,
+      "context_steps": 384,
+      "model": "timesfm3"
+    },
+    {
+      "context_multiplier": 48.833333333333336,
+      "context_steps": 586,
+      "model": "timesfm3"
+    },
+    {
+      "context_multiplier": 64.0,
+      "context_steps": 768,
+      "model": "timesfm3"
+    },
+    {
+      "context_multiplier": 97.66666666666667,
+      "context_steps": 1172,
+      "model": "timesfm3"
+    },
+    {
+      "context_multiplier": 128.0,
+      "context_steps": 1536,
+      "model": "timesfm3"
+    },
+    {
+      "context_multiplier": 195.33333333333334,
+      "context_steps": 2344,
+      "model": "timesfm3"
+    },
+    {
+      "context_multiplier": 256.0,
+      "context_steps": 3072,
+      "model": "timesfm3"
+    },
+    {
+      "context_multiplier": 341.3333333333333,
+      "context_steps": 4096,
+      "model": "timesfm3"
+    },
+    {
+      "context_multiplier": 1.0,
+      "context_steps": 12,
+      "model": "tirex2"
+    },
+    {
+      "context_multiplier": 2.0,
+      "context_steps": 24,
+      "model": "tirex2"
+    },
+    {
+      "context_multiplier": 4.0,
+      "context_steps": 48,
+      "model": "tirex2"
+    },
+    {
+      "context_multiplier": 8.0,
+      "context_steps": 96,
+      "model": "tirex2"
+    },
+    {
+      "context_multiplier": 16.0,
+      "context_steps": 192,
+      "model": "tirex2"
+    },
+    {
+      "context_multiplier": 24.416666666666668,
+      "context_steps": 293,
+      "model": "tirex2"
+    },
+    {
+      "context_multiplier": 32.0,
+      "context_steps": 384,
+      "model": "tirex2"
+    },
+    {
+      "context_multiplier": 48.833333333333336,
+      "context_steps": 586,
+      "model": "tirex2"
+    },
+    {
+      "context_multiplier": 64.0,
+      "context_steps": 768,
+      "model": "tirex2"
+    },
+    {
+      "context_multiplier": 97.66666666666667,
+      "context_steps": 1172,
+      "model": "tirex2"
+    },
+    {
+      "context_multiplier": 128.0,
+      "context_steps": 1536,
+      "model": "tirex2"
+    }
+  ],
+  "proposed_candidates": [
+    {
+      "context_multiplier": 1.0,
+      "context_steps": 12,
+      "model": "chronos2"
+    },
+    {
+      "context_multiplier": 24.416666666666668,
+      "context_steps": 293,
+      "model": "chronos2"
+    },
+    {
+      "context_multiplier": 97.66666666666667,
+      "context_steps": 1172,
+      "model": "chronos2"
+    },
+    {
+      "context_multiplier": 1.0,
+      "context_steps": 12,
+      "model": "timesfm3"
+    },
+    {
+      "context_multiplier": 24.416666666666668,
+      "context_steps": 293,
+      "model": "timesfm3"
+    },
+    {
+      "context_multiplier": 97.66666666666667,
+      "context_steps": 1172,
+      "model": "timesfm3"
+    },
+    {
+      "context_multiplier": 1.0,
+      "context_steps": 12,
+      "model": "tirex2"
+    },
+    {
+      "context_multiplier": 24.416666666666668,
+      "context_steps": 293,
+      "model": "tirex2"
+    },
+    {
+      "context_multiplier": 97.66666666666667,
+      "context_steps": 1172,
+      "model": "tirex2"
+    }
+  ],
+  "rationale": [
+    "Selected at most 3 interpretable context configurations per model.",
+    "Feasible context is bounded by 4096 steps (341.3\u00d7H) from leakage-safe history/resource capacity.",
+    "Credible repeating structure detected (spectral strength=0.385, dominant period\u2248292.6 steps, ACF(P)=0.568): retaining a complete-cycle context."
+  ],
+  "search_reduction": 0.7692307692307692
+}

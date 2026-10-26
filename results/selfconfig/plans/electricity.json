@@ -1,0 +1,182 @@
+{
+  "dataset_name": "electricity",
+  "fingerprint": {
+    "acf_horizon": 0.9061339532830052,
+    "acf_lag1": 0.951793176399854,
+    "between_series_acf_variability": 0.13918706407430811,
+    "between_series_mean_variability": 3.4431754096959803,
+    "between_series_scale_variability": 1.267438014076659,
+    "coefficient_of_variation": 1.5118253122676908,
+    "constant_series_fraction": 0.0,
+    "dataset_name": "electricity",
+    "dominant_period_seconds": 86738.82352941176,
+    "dominant_period_steps": 96.37647058823529,
+    "excess_kurtosis": 10.04863550599678,
+    "forecast_horizon_seconds": 86400.0,
+    "forecast_horizon_steps": 96,
+    "max_series_length": 132767,
+    "median_series_length": 132767.0,
+    "min_series_length": 53109,
+    "missing_fraction": 0.0,
+    "n_series": 53,
+    "n_variables": 1,
+    "sampling_interval_seconds": 900.0,
+    "seasonality_strength": 0.9108225734788872,
+    "skewness": 2.9458486152414314,
+    "spectral_entropy": 0.3443796561486743,
+    "trend_strength": 0.011456000963929862,
+    "value_iqr": 260.05612506860757,
+    "value_median": 124.378109452736,
+    "zero_fraction": 0.02457298422759434
+  },
+  "full_candidates": [
+    {
+      "context_multiplier": 1.0,
+      "context_steps": 96,
+      "model": "chronos2"
+    },
+    {
+      "context_multiplier": 2.0,
+      "context_steps": 192,
+      "model": "chronos2"
+    },
+    {
+      "context_multiplier": 4.0,
+      "context_steps": 384,
+      "model": "chronos2"
+    },
+    {
+      "context_multiplier": 8.0,
+      "context_steps": 768,
+      "model": "chronos2"
+    },
+    {
+      "context_multiplier": 16.0,
+      "context_steps": 1536,
+      "model": "chronos2"
+    },
+    {
+      "context_multiplier": 32.0,
+      "context_steps": 3072,
+      "model": "chronos2"
+    },
+    {
+      "context_multiplier": 42.666666666666664,
+      "context_steps": 4096,
+      "model": "chronos2"
+    },
+    {
+      "context_multiplier": 1.0,
+      "context_steps": 96,
+      "model": "timesfm3"
+    },
+    {
+      "context_multiplier": 2.0,
+      "context_steps": 192,
+      "model": "timesfm3"
+    },
+    {
+      "context_multiplier": 4.0,
+      "context_steps": 384,
+      "model": "timesfm3"
+    },
+    {
+      "context_multiplier": 8.0,
+      "context_steps": 768,
+      "model": "timesfm3"
+    },
+    {
+      "context_multiplier": 16.0,
+      "context_steps": 1536,
+      "model": "timesfm3"
+    },
+    {
+      "context_multiplier": 32.0,
+      "context_steps": 3072,
+      "model": "timesfm3"
+    },
+    {
+      "context_multiplier": 42.666666666666664,
+      "context_steps": 4096,
+      "model": "timesfm3"
+    },
+    {
+      "context_multiplier": 1.0,
+      "context_steps": 96,
+      "model": "tirex2"
+    },
+    {
+      "context_multiplier": 2.0,
+      "context_steps": 192,
+      "model": "tirex2"
+    },
+    {
+      "context_multiplier": 4.0,
+      "context_steps": 384,
+      "model": "tirex2"
+    },
+    {
+      "context_multiplier": 8.0,
+      "context_steps": 768,
+      "model": "tirex2"
+    },
+    {
+      "context_multiplier": 16.0,
+      "context_steps": 1536,
+      "model": "tirex2"
+    }
+  ],
+  "proposed_candidates": [
+    {
+      "context_multiplier": 1.0,
+      "context_steps": 96,
+      "model": "chronos2"
+    },
+    {
+      "context_multiplier": 2.0,
+      "context_steps": 192,
+      "model": "chronos2"
+    },
+    {
+      "context_multiplier": 8.0,
+      "context_steps": 768,
+      "model": "chronos2"
+    },
+    {
+      "context_multiplier": 1.0,
+      "context_steps": 96,
+      "model": "timesfm3"
+    },
+    {
+      "context_multiplier": 2.0,
+      "context_steps": 192,
+      "model": "timesfm3"
+    },
+    {
+      "context_multiplier": 8.0,
+      "context_steps": 768,
+      "model": "timesfm3"
+    },
+    {
+      "context_multiplier": 1.0,
+      "context_steps": 96,
+      "model": "tirex2"
+    },
+    {
+      "context_multiplier": 2.0,
+      "context_steps": 192,
+      "model": "tirex2"
+    },
+    {
+      "context_multiplier": 8.0,
+      "context_steps": 768,
+      "model": "tirex2"
+    }
+  ],
+  "rationale": [
+    "Selected at most 3 interpretable context configurations per model.",
+    "Feasible context is bounded by 4096 steps (42.7\u00d7H) from leakage-safe history/resource capacity.",
+    "Credible repeating structure detected (spectral strength=0.911, dominant period\u224896.4 steps, ACF(P)=0.899): retaining a complete-cycle context."
+  ],
+  "search_reduction": 0.5263157894736843
+}
