@@ -30,6 +30,9 @@ def run_context_curve(
     split=None,
     context_hours=None,
     max_cases=None,
+    sample_entities=None,
+    origins_per_entity=None,
+    sample_seed=42,
     output_root="results",
 ):
     # -------------------------------------------------------------
@@ -44,6 +47,19 @@ def run_context_curve(
     spec = dataset.spec
 
     protocol = dataset.protocol.copy()
+
+    # Phase-2 balanced sampling: identical entities/origins across models.
+    if sample_entities is not None or origins_per_entity is not None:
+        if max_cases is not None:
+            raise ValueError("Use either balanced sampling or --max-cases, not both")
+        from src.evaluation.case_sampling import balanced_subset
+        protocol = balanced_subset(
+            protocol,
+            id_col=spec.id_col,
+            n_entities=sample_entities,
+            origins_per_entity=origins_per_entity,
+            seed=sample_seed,
+        )
 
     if max_cases is not None:
         protocol = (
@@ -94,6 +110,12 @@ def run_context_curve(
     elif model_key == "tirex2":
         batch_size = 8
 
+    elif model_key in ("toto2_22m", "toto2_313m"):
+        batch_size = 8
+
+    elif model_key == "moirai2_small":
+        batch_size = 8
+
     else:
         raise ValueError(
             f"Unknown model: {model_key}"
@@ -124,6 +146,11 @@ def run_context_curve(
     output_dir.mkdir(
         parents=True,
         exist_ok=True,
+    )
+
+    # Freeze the evaluation-case identity for cross-model comparisons.
+    protocol[[spec.id_col, "eval_index", "eval_origin", "target_start", "target_end"]].to_csv(
+        output_dir / "case_selection.csv", index=False
     )
 
     print("=" * 78)
@@ -485,6 +512,16 @@ def run_context_curve(
         summary_path,
         index=False,
     )
+
+    # -------------------------------------------------------------
+    # Optional Phase-2 per-batch timing audit
+    # -------------------------------------------------------------
+    if getattr(model, "batch_timings", None):
+        pd.DataFrame(model.batch_timings).to_csv(
+            output_dir / "runtime_batches.csv", index=False
+        )
+        print("Model checkpoint:", model.model_id)
+        print("Model load seconds:", round(model.load_seconds, 3))
 
     # -------------------------------------------------------------
     # Report

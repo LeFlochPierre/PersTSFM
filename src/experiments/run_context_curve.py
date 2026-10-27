@@ -32,6 +32,9 @@ def parse_args():
             "chronos2",
             "timesfm3",
             "tirex2",
+            "toto2_22m",
+            "toto2_313m",
+            "moirai2_small",
         ],
     )
 
@@ -61,6 +64,12 @@ def parse_args():
         ),
     )
 
+    parser.add_argument("--sample-entities", type=int, default=None,
+                        help="Select a deterministic subset of entities")
+    parser.add_argument("--origins-per-entity", type=int, default=None,
+                        help="Select temporally spread origins per entity")
+    parser.add_argument("--sample-seed", type=int, default=42)
+
     parser.add_argument(
         "--output-root",
         default="results",
@@ -88,6 +97,9 @@ def main():
         max_cases=(
             args.max_cases
         ),
+        sample_entities=args.sample_entities,
+        origins_per_entity=args.origins_per_entity,
+        sample_seed=args.sample_seed,
         output_root=(
             args.output_root
         ),

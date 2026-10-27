@@ -42,3 +42,15 @@ wandb/
 *.tmp
 *.log
 *~
+
+# Generated research outputs
+results/
+
+# Old migration packages and backups
+archive/
+*.zip
+*.bak
+
+# Environment and temporary research snapshots
+docs/environment_snapshots/
+docs/research_snapshots/

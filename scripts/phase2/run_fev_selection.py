@@ -1,0 +1,224 @@
+#!/usr/bin/env python3
+"""Run a PersTSFM model on frozen FEV SELECTION histories only.
+
+No fev import; no labels, no later evaluation inputs, and no access to
+get_ground_truth. Run within the model-specific conda environment.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import time
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def as_1d(values, *, dtype, label: str) -> np.ndarray:
+    a = np.asarray(values, dtype=dtype)
+    if a.ndim != 1 or not len(a):
+        raise ValueError(f"{label}: expected nonempty 1D vector, got shape {a.shape}")
+    return a
+
+
+def make_input(record: dict, context_steps: int, horizon: int):
+    """Convert one frozen row; return ForecastInput, frozen future timestamps."""
+    from src.models.adapters import ForecastInput
+
+    hist = as_1d(record["history"], dtype=np.float64, label="history")
+    stamps = as_1d(record["history_timestamps_ns"], dtype=np.int64, label="history timestamps")
+    future = as_1d(record["future_timestamps_ns"], dtype=np.int64, label="future timestamps")
+    if hist.size != stamps.size or future.size != horizon:
+        raise ValueError(f"{record['case_id']}: history or horizon length mismatch")
+    if int(record["observed_steps_saved"]) != hist.size:
+        raise ValueError(f"{record['case_id']}: saved history count mismatch")
+    if hist.size < context_steps:
+        raise ValueError(f"{record['case_id']}: only {hist.size} observed history steps")
+    if not np.isfinite(hist).all():
+        raise ValueError(f"{record['case_id']}: non-finite historical observations; no implicit imputation")
+    if np.any(np.diff(stamps) <= 0) or np.any(np.diff(future) <= 0) or stamps[-1] >= future[0]:
+        raise ValueError(f"{record['case_id']}: timestamps are not leakage-safe")
+    if len(stamps) > 1:
+        spacing = np.diff(stamps[-context_steps:])
+        if len(spacing) and not (spacing == spacing[0]).all():
+            raise ValueError(f"{record['case_id']}: irregular sampling in context")
+        if len(spacing) and future[0] - stamps[-1] != spacing[0]:
+            raise ValueError(f"{record['case_id']}: gap between context and forecast horizon")
+        if len(spacing) and np.any(np.diff(future) != spacing[0]):
+            raise ValueError(f"{record['case_id']}: forecast grid is not regular")
+    trimmed = hist[-context_steps:]
+    trimmed_stamps = stamps[-context_steps:]
+    return ForecastInput(
+        case_id=str(record["case_id"]),
+        timestamps=pd.DatetimeIndex(pd.to_datetime(trimmed_stamps, unit="ns", utc=True)).tz_localize(None),
+        values=trimmed.astype(np.float32, copy=False),
+    ), future
+
+
+def validate_and_export(outputs, inputs, records, futures, horizon, *, model, context, task):
+    if len(outputs) != len(inputs):
+        raise RuntimeError("Model output count mismatch")
+    result_by_id = {str(o.case_id): o for o in outputs}
+    if len(result_by_id) != len(inputs) or set(result_by_id) != {str(i.case_id) for i in inputs}:
+        raise RuntimeError("Model output IDs are missing, repeated or unexpected")
+    rows = []
+    for item, record, future in zip(inputs, records, futures):
+        output = result_by_id[item.case_id]
+        obj = {"task": task, "role": "selection", "model": model,
+               "context_steps": int(context), "case_id": item.case_id,
+               "entity_id": str(record["entity_id"]), "window_index": int(record["window_index"]),
+               "future_timestamps_ns": future.tolist()}
+        for field in ["prediction", "q10", "q50", "q90"]:
+            a = as_1d(getattr(output, field), dtype=np.float64, label=field)
+            if len(a) != horizon or not np.isfinite(a).all():
+                raise ValueError(f"{item.case_id}: bad {field} output")
+            obj[field] = a.tolist()
+        if np.any(np.asarray(obj["q10"]) > np.asarray(obj["q50"]) + 1e-6) or np.any(np.asarray(obj["q50"]) > np.asarray(obj["q90"]) + 1e-6):
+            raise ValueError(f"{item.case_id}: crossing quantiles")
+        rows.append(obj)
+    return rows
+
+
+def resolution_minutes(record):
+    stamps = np.asarray(record["history_timestamps_ns"], dtype=np.int64)
+    if stamps.size < 2:
+        raise ValueError("Need at least two timestamps to infer sampling interval")
+    dt = int(stamps[-1] - stamps[-2])
+    if dt <= 0 or dt % (60 * 10**9):
+        raise ValueError("Sampling cadence is not an integral number of minutes")
+    return dt // (60 * 10**9)
+
+
+def device_sync():
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+    except ImportError:
+        return
+
+
+def gpu_peak() -> float | None:
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return torch.cuda.max_memory_allocated() / 1e9
+    except ImportError:
+        pass
+    return None
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--task", choices=["m4_hourly", "ett1_ot", "ercot"], required=True)
+    p.add_argument("--model", required=True)
+    p.add_argument("--context", type=int, required=True)
+    p.add_argument("--batch-size", type=int, default=8)
+    p.add_argument("--max-entities", type=int, default=None, help="Smoke-test only; first N sorted IDs")
+    p.add_argument("--windows", nargs="+", type=int, default=None, help="Selection window IDs; omit for full selection")
+    p.add_argument("--protocol-root", default="results/phase2/external_protocol_v2")
+    p.add_argument("--output-root", default="results/phase2/external_forecasts")
+    args = p.parse_args()
+    if args.context < 2 or args.batch_size < 1 or (args.max_entities is not None and args.max_entities < 1):
+        p.error("invalid context/batch size/entity cap")
+    root = Path(args.protocol_root) / args.task
+    manifest_file = root / "manifest.json"
+    history_file = root / "selection_inputs.parquet"
+    manifest = json.loads(manifest_file.read_text())
+    if manifest.get("schema") != "pertsfm_fev_input_protocol_v2" or manifest.get("task") != args.task:
+        raise RuntimeError("Wrong or unrecognised protocol")
+    if manifest.get("timestamps_unit") != "ns":
+        raise RuntimeError("Expected nanosecond v2 protocol; regenerate frozen inputs")
+    if manifest.get("status") != "DEVELOPMENT_ONLY_NOT_HELD_OUT" or manifest.get("future_targets_included") is not False:
+        raise RuntimeError("Protocol access policy invalid")
+    if sha256_file(history_file) != manifest["selection_inputs_sha256"]:
+        raise RuntimeError("Selection input hash differs from frozen manifest")
+    if args.context not in manifest["contexts_steps"]:
+        raise ValueError("Requested context not in frozen grid")
+    # Known model-specific bound from the frozen PersTSFM adapter. Other
+    # checkpoints must additionally enforce their limits in their adapters.
+    if args.model == "tirex2" and args.context > 2048:
+        raise ValueError("TiRex-2 supports at most 2048 context steps")
+    permitted_windows = set(map(int, manifest["selection_window_indices"]))
+    selected_windows = set(args.windows) if args.windows is not None else permitted_windows
+    if not selected_windows or not selected_windows.issubset(permitted_windows):
+        raise ValueError("Only frozen SELECTION windows are permitted")
+    data = pd.read_parquet(history_file)
+    if set(data["role"]) != {"selection"} or data["case_id"].duplicated().any():
+        raise RuntimeError("Corrupt or non-selection protocol rows")
+    data = data.loc[data["window_index"].isin(selected_windows)].copy()
+    if args.max_entities is not None:
+        eligible = sorted(data["entity_id"].astype(str).unique().tolist())[: args.max_entities]
+        data = data.loc[data["entity_id"].astype(str).isin(eligible)]
+    data = data.sort_values(["window_index", "entity_id"]).reset_index(drop=True)
+    if data.empty:
+        raise ValueError("No eligible cases")
+    if (data["observed_steps_saved"] < args.context).any():
+        raise ValueError("Not all frozen cases have sufficient history")
+    full_run = args.max_entities is None and selected_windows == permitted_windows
+    scope = "all" if full_run else "subset_" + (str(args.max_entities) if args.max_entities else "all") + "_w" + "-".join(map(str, sorted(selected_windows)))
+    outdir = Path(args.output_root) / args.task / "selection" / args.model / f"context_{args.context}" / scope
+    pred_path, meta_path = outdir / "predictions.parquet", outdir / "run_manifest.json"
+    if pred_path.exists() or meta_path.exists():
+        raise FileExistsError(f"Output exists: {outdir} (not overwriting)")
+
+    from src.models.adapters import build_model
+    print(f"TASK {args.task} | ROLE selection | MODEL {args.model} | CONTEXT {args.context} | CASES {len(data)} | windows={sorted(selected_windows)}", flush=True)
+    t0 = time.perf_counter()
+    model = build_model(args.model, batch_size=args.batch_size)
+    device_sync()
+    load_seconds = time.perf_counter() - t0
+    print(f"Model load: {load_seconds:.3f}s", flush=True)
+    all_rows = []
+    times = []
+    for start in range(0, len(data), args.batch_size):
+        records = data.iloc[start: start + args.batch_size].to_dict(orient="records")
+        items, futures = [], []
+        for record in records:
+            x, future = make_input(record, args.context, int(manifest["horizon"]))
+            items.append(x)
+            futures.append(future)
+        cadence = {resolution_minutes(record) for record in records}
+        if len(cadence) != 1:
+            raise ValueError("Mixed resolutions within batch")
+        device_sync()
+        t1 = time.perf_counter()
+        outputs = model.predict_batch(
+            inputs=items, horizon=int(manifest["horizon"]), resolution_minutes=cadence.pop(),
+            context_steps=args.context, batch_size=args.batch_size)
+        device_sync()
+        elapsed = time.perf_counter() - t1
+        times.append(elapsed)
+        all_rows.extend(validate_and_export(outputs, items, records, futures, int(manifest["horizon"]),
+                                            model=args.model, context=args.context, task=args.task))
+        print(f"  batch {start // args.batch_size + 1} | cases {len(all_rows)}/{len(data)} | inference {elapsed:.3f}s", flush=True)
+    if len(all_rows) != len(data):
+        raise RuntimeError("Incomplete predictions")
+    outdir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(all_rows).to_parquet(pred_path, index=False)
+    info = {
+        "schema": "pertsfm_fev_selection_forecast_v1", "task": args.task, "role": "selection",
+        "model": args.model, "context_steps": args.context, "full_selection_cohort": full_run,
+        "n_cases": len(all_rows), "n_entities": int(data["entity_id"].nunique()),
+        "windows": sorted(selected_windows), "protocol_selection_sha256": manifest["selection_inputs_sha256"],
+        "protocol_manifest_sha256": sha256_file(manifest_file),
+        "predictions_sha256": sha256_file(pred_path), "model_load_seconds": load_seconds,
+        "inference_seconds": float(sum(times)), "gpu_peak_allocated_gb": gpu_peak(),
+        "note": "No future targets or evaluation inputs used. Time excludes data load and output serialisation."
+    }
+    meta_path.write_text(json.dumps(info, indent=2) + "\n")
+    print(f"PASS | forecasts={len(all_rows)} | inference={sum(times):.3f}s | saved={pred_path}", flush=True)
+
+
+if __name__ == "__main__":
+    main()

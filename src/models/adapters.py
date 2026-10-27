@@ -609,9 +609,17 @@ def build_model(
     if model_key == "tirex2":
         return TiRex2Model()
 
+    if model_key in ("toto2_22m", "toto2_313m"):
+        from src.models.toto2_adapter import Toto2ForecastModel
+        return Toto2ForecastModel(model_key=model_key)
+
+    if model_key == "moirai2_small":
+        from src.models.moirai2_adapter import Moirai2ForecastModel
+        return Moirai2ForecastModel()
+
     raise ValueError(
         f"Unknown model "
         f"'{model_key}'. "
         "Available models: "
-        "chronos2, timesfm3, tirex2"
+        "chronos2, timesfm3, tirex2, toto2_22m, toto2_313m, moirai2_small"
     )

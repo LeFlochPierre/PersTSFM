@@ -1,0 +1,260 @@
+#!/usr/bin/env python3
+"""PersTSFM Phase 2.4 — freeze external fev input cases WITHOUT accessing future target values.
+
+Requires: fev==0.10.0 (data environment), numpy, pandas, pyarrow.
+Inputs: existing *preflight.json files from fev_preflight.py.
+Output: input-only Parquet + manifest with chronological/eligibility audits.
+
+Do not use future test targets during task selection. This script ONLY calls
+EvaluationWindow.get_input_data() and never get_ground_truth().
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+from collections import defaultdict
+from datetime import datetime, timezone
+from importlib.metadata import version
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+
+DEFAULT_CONTEXTS = {
+    "m4_hourly": [96, 192, 384],
+    "ett1_ot": [96, 192, 384, 768, 1536, 3072],
+    "ercot": [96, 192, 384, 768, 1536, 3072],
+}
+
+
+def parse_args():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--task", required=True, choices=sorted(DEFAULT_CONTEXTS))
+    p.add_argument("--contexts", type=int, nargs="+", default=None)
+    p.add_argument("--preflight-root", default="results/phase2/external_preflight")
+    p.add_argument("--output-root", default="results/phase2/external_protocol_v2")
+    p.add_argument("--selection-windows", type=int, default=4)
+    p.add_argument("--check-only", action="store_true")
+    p.add_argument("--force", action="store_true")
+    return p.parse_args()
+
+
+def timestamps_ns(sequence, label):
+    dates = pd.DatetimeIndex(pd.to_datetime(sequence, utc=True)).as_unit("ns")
+    if len(dates) == 0 or dates.hasnans:
+        raise RuntimeError(f"{label}: missing/empty timestamps")
+    vals = dates.asi8.astype(np.int64)
+    if len(vals) > 1 and not bool(np.all(np.diff(vals) > 0)):
+        raise RuntimeError(f"{label}: non-increasing or duplicate timestamps")
+    return vals
+
+
+def json_safe(obj):
+    if isinstance(obj, dict):
+        return {str(k): json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [json_safe(v) for v in obj]
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        return float(obj)
+    return obj
+
+
+def role_for_window(wi, n_selection):
+    return "selection" if wi < n_selection else "evaluation"
+
+
+def validate_chronology(rows, time_semantics):
+    by_id = defaultdict(list)
+    for r in rows:
+        by_id[r["entity_id"]].append(r)
+    for ident, entity_rows in by_id.items():
+        rr = sorted(entity_rows, key=lambda x: x["window_index"])
+        for prev, nxt in zip(rr, rr[1:]):
+            if prev["window_index"] + 1 != nxt["window_index"]:
+                raise RuntimeError(f"{ident}: missing or unordered rolling windows")
+            if prev["future_end_ns"] >= nxt["future_start_ns"]:
+                raise RuntimeError(f"{ident}: overlapping future target windows")
+        train = [r for r in rr if r["role"] == "selection"]
+        test = [r for r in rr if r["role"] == "evaluation"]
+        if not train or not test or max(r["future_end_ns"] for r in train) >= min(r["future_start_ns"] for r in test):
+            raise RuntimeError(f"{ident}: selection/evaluation timestamps overlap")
+    if time_semantics != "series_relative_not_global_calendar":
+        train_end = max(r["future_end_ns"] for r in rows if r["role"] == "selection")
+        test_start = min(r["future_start_ns"] for r in rows if r["role"] == "evaluation")
+        if train_end >= test_start:
+            raise RuntimeError("Global calendar chronology is not strict")
+        return "strict_global_calendar"
+    return "strict_within_entity_only"
+
+
+def select_common_cohort(candidates, contexts, windows):
+    max_context = max(contexts)
+    available = defaultdict(set)
+    for r in candidates:
+        if r["history_length"] >= max_context:
+            available[r["entity_id"]].add(r["window_index"])
+    all_windows = set(range(windows))
+    keep = {k for k, ids in available.items() if ids == all_windows}
+    if not keep:
+        raise RuntimeError("No series have a common feasible cohort across all contexts and windows")
+    result = [r for r in candidates if r["entity_id"] in keep]
+    if len(result) != len(keep) * windows:
+        raise RuntimeError("Case count mismatch in common cohort")
+    return result, keep
+
+
+def create_rows(task, spec, contexts, n_selection):
+    id_col = task.id_column
+    stamp_col = task.timestamp_column
+    target_cols = task.target_columns
+    if len(target_cols) != 1:
+        raise RuntimeError(f"Expected exactly one univariate target; found {target_cols}")
+    target_col = target_cols[0]
+    max_context = max(contexts)
+    rows = []
+    n_windows = int(spec["task_kwargs"]["num_windows"])
+    for wi, window in enumerate(task.iter_windows()):
+        past, future_known = window.get_input_data()  # input ONLY; never ground truth
+        known_by_id = {str(r[id_col]): r for r in future_known}
+        if len(known_by_id) != len(future_known):
+            raise RuntimeError(f"Window {wi}: repeated future-known entity IDs")
+        n_before = len(rows)
+        for record in past:
+            ident = str(record[id_col])
+            if ident not in known_by_id:
+                raise RuntimeError(f"Window {wi}: missing future-known info for {ident}")
+            historical = np.asarray(record[target_col], dtype=np.float64)
+            past_ns = timestamps_ns(record[stamp_col], f"{ident} window={wi} past")
+            future_ns = timestamps_ns(known_by_id[ident][stamp_col], f"{ident} window={wi} future")
+            if historical.ndim != 1 or len(historical) != len(past_ns):
+                raise RuntimeError(f"{ident} window={wi}: target/timestamp mismatch")
+            if len(future_ns) != int(task.horizon):
+                raise RuntimeError(f"{ident} window={wi}: horizon mismatch")
+            if past_ns[-1] >= future_ns[0]:
+                raise RuntimeError(f"{ident} window={wi}: future starts before observation cutoff")
+            n = len(historical)
+            # Do not invent historical values: only store observed past up to the cutoff.
+            trimmed = historical[-min(n, max_context):]
+            saved_timestamps = past_ns[-len(trimmed):]
+            if np.isinf(trimmed).any():
+                raise RuntimeError(f"{ident} window={wi}: infinite input values")
+            rows.append({
+                "task": spec["task_name"],
+                "family": spec["family"],
+                "entity_id": ident,
+                "window_index": wi,
+                "role": role_for_window(wi, n_selection),
+                "case_id": f"{spec['task_name']}__w{wi:02d}__{ident}",
+                "history_length": n,
+                "window_last_past_ns": int(past_ns[-1]),
+                "future_start_ns": int(future_ns[0]),
+                "future_end_ns": int(future_ns[-1]),
+                "observed_steps_saved": len(trimmed),
+                "missing_steps_saved": int(np.isnan(trimmed).sum()),
+                "history": trimmed.tolist(),
+                "history_timestamps_ns": saved_timestamps.tolist(),
+                "future_timestamps_ns": future_ns.tolist(),
+            })
+        if len(rows) - n_before != len(known_by_id):
+            raise RuntimeError(f"Window {wi}: past and future-known sets don't match")
+        print(f"Window {wi:02d}: {len(rows)-n_before} candidates | role={role_for_window(wi,n_selection)}", flush=True)
+    if len({r["window_index"] for r in rows}) != n_windows:
+        raise RuntimeError(f"Expected {n_windows} windows")
+    return rows
+
+
+def main():
+    args = parse_args()
+    contexts = sorted(set(args.contexts or DEFAULT_CONTEXTS[args.task]))
+    if not contexts or min(contexts) < 1:
+        raise ValueError("Contexts must be positive integers")
+
+    preflight_path = Path(args.preflight_root) / f"{args.task}_preflight.json"
+    spec = json.loads(preflight_path.read_text())
+    if spec["task_name"] != args.task or spec["schema"] != "pertsfm_external_task_preflight_v1":
+        raise RuntimeError("Preflight/task mismatch")
+    n_windows = int(spec["task_kwargs"]["num_windows"])
+    if not 1 <= args.selection_windows < n_windows:
+        raise ValueError("Need selection and evaluation windows")
+
+    import fev
+    fev_version = version("fev")
+    if fev_version != spec["fev_version"]:
+        raise RuntimeError(f"fev version changed since preflight: {spec['fev_version']} -> {fev_version}")
+    task = fev.Task(**spec["task_kwargs"])
+    print("=" * 76)
+    print(f"PersTSFM FEV protocol freeze | {args.task} | fev {fev_version}")
+    print(f"Contexts: {contexts} | selection windows: {args.selection_windows} | evaluation windows: {n_windows-args.selection_windows}")
+    print("Accessing model inputs only — future target values are NOT loaded")
+
+    candidates = create_rows(task, spec, contexts, args.selection_windows)
+    rows, entity_set = select_common_cohort(candidates, contexts, n_windows)
+    rows.sort(key=lambda r: (r["window_index"], r["entity_id"]))
+    chronology = validate_chronology(rows, spec["time_semantics"])
+    n_missing = sum(r["missing_steps_saved"] for r in rows)
+    print(f"Common cohort: {len(entity_set)} entities | {len(rows)} cases")
+    print(f"Chronology: {chronology} | missing values in stored histories: {n_missing}")
+    print(f"Selection cases: {sum(r['role']=='selection' for r in rows)}")
+    print(f"Evaluation cases: {sum(r['role']=='evaluation' for r in rows)}")
+
+    manifest = {
+        "schema": "pertsfm_fev_input_protocol_v2",
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "status": "DEVELOPMENT_ONLY_NOT_HELD_OUT",
+        "task": args.task,
+        "family": spec["family"],
+        "fev_version": fev_version,
+        "timestamps_unit": "ns",
+        "preflight_spec_sha256": spec["task_spec_sha256"],
+        "task_kwargs": json_safe(spec["task_kwargs"]),
+        "time_semantics": spec["time_semantics"],
+        "chronology_validation": chronology,
+        "contexts_steps": contexts,
+        "max_context_steps": max(contexts),
+        "selection_window_indices": list(range(args.selection_windows)),
+        "evaluation_window_indices": list(range(args.selection_windows,n_windows)),
+        "n_entities": len(entity_set),
+        "n_cases": len(rows),
+        "n_missing_historical_values": n_missing,
+        "id_column": task.id_column,
+        "timestamp_column": task.timestamp_column,
+        "target_column": task.target_columns[0],
+        "horizon": int(task.horizon),
+        "future_targets_included": False,
+        "warning": "These datasets are now development-only. Training data of checkpoints may overlap sources. "
+                   "Do not evaluate final model selection on these same cases.",
+    }
+    ids_string = json.dumps([r["case_id"] for r in rows], ensure_ascii=False)
+    manifest["ordered_case_ids_sha256"] = hashlib.sha256(ids_string.encode("utf-8")).hexdigest()
+    if args.check_only:
+        print("PASS: protocol checks (check-only; no input export)")
+        return
+    out = Path(args.output_root) / args.task
+    selection_file = out / "selection_inputs.parquet"
+    evaluation_file = out / "evaluation_inputs.parquet"
+    meta = out / "manifest.json"
+    if any(p.exists() for p in [selection_file, evaluation_file, meta]) and not args.force:
+        raise FileExistsError(f"Protocol already exists at {out}; use --force deliberately")
+    out.mkdir(parents=True, exist_ok=True)
+    # Physically separate input histories for policy selection from later evaluation.
+    # Neither file contains future outcomes; the evaluation file must remain hidden
+    # from the selection policy until that policy is frozen.
+    selection_rows = [r for r in rows if r["role"] == "selection"]
+    evaluation_rows = [r for r in rows if r["role"] == "evaluation"]
+    pd.DataFrame(selection_rows).to_parquet(selection_file, index=False)
+    pd.DataFrame(evaluation_rows).to_parquet(evaluation_file, index=False)
+    manifest["selection_inputs_sha256"] = hashlib.sha256(selection_file.read_bytes()).hexdigest()
+    manifest["evaluation_inputs_sha256"] = hashlib.sha256(evaluation_file.read_bytes()).hexdigest()
+    meta.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+    print("PASS: frozen input-only protocol")
+    print("Saved:", selection_file)
+    print("Saved:", evaluation_file, "(NOT for model selection)")
+    print("Saved:", meta)
+
+
+if __name__ == "__main__":
+    main()

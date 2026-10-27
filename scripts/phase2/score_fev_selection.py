@@ -1,0 +1,159 @@
+#!/usr/bin/env python3
+"""Score ONLY frozen FEV selection-window forecasts (fev data environment).
+
+This is an explicitly separate, label-aware process. It refuses forecasts
+from evaluation windows and incomplete selection runs; the model inference
+runner never loads any ground truth.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def seasonal_scale(history: np.ndarray, seasonality: int) -> float:
+    history = np.asarray(history, dtype=np.float64)
+    if history.ndim != 1 or seasonality < 1 or len(history) <= seasonality:
+        return float("nan")
+    errors = np.abs(history[seasonality:] - history[:-seasonality])
+    if not np.isfinite(errors).any():
+        return float("nan")
+    den = float(np.nanmean(errors))
+    return den if np.isfinite(den) and den > 0 else float("nan")
+
+
+def evaluate_one(row, gt, past, *, horizon, seasonality):
+    y = np.asarray(gt, dtype=np.float64)
+    yhat = np.asarray(row["prediction"], dtype=np.float64)
+    if y.shape != (horizon,) or yhat.shape != (horizon,) or not (np.isfinite(y).all() and np.isfinite(yhat).all()):
+        raise ValueError("Missing/nonfinite/mismatched truth or predictions")
+    mae = float(np.mean(np.abs(yhat - y)))
+    scale = seasonal_scale(past, seasonality)
+    return mae, (mae / scale if np.isfinite(scale) else float("nan"))
+
+
+def truth_timestamps_ns(sequence):
+    """Normalize any datetime64[s/ms/us/ns] to integer nanoseconds."""
+    return pd.DatetimeIndex(pd.to_datetime(sequence, utc=True)).as_unit("ns").asi8
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--predictions", type=Path, required=True, help="Complete selection predictions.parquet")
+    ap.add_argument("--protocol-root", type=Path, default=Path("results/phase2/external_protocol_v2"))
+    args = ap.parse_args()
+    pred_path = args.predictions
+    run_path = pred_path.with_name("run_manifest.json")
+    run = json.loads(run_path.read_text())
+    if run["schema"] != "pertsfm_fev_selection_forecast_v1" or run["role"] != "selection" or not run["full_selection_cohort"]:
+        raise RuntimeError("Only complete frozen selection forecasts may be scored")
+    task_name = run["task"]
+    frozen = args.protocol_root / task_name
+    manifest_path = frozen / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    if manifest.get("schema") != "pertsfm_fev_input_protocol_v2" or manifest.get("timestamps_unit") != "ns":
+        raise RuntimeError("Expected nanosecond v2 protocol")
+    if (sha256_file(manifest_path) != run["protocol_manifest_sha256"] or
+            manifest["selection_inputs_sha256"] != run["protocol_selection_sha256"] or
+            sha256_file(pred_path) != run["predictions_sha256"]):
+        raise RuntimeError("Input/forecast manifest hash mismatch")
+    import fev
+    from importlib.metadata import version
+    if version("fev") != manifest["fev_version"]:
+        raise RuntimeError("FEV version mismatch")
+    task = fev.Task(**manifest["task_kwargs"])
+    target = manifest["target_column"]
+    id_col = manifest["id_column"]
+    stamp_col = manifest["timestamp_column"]
+    context = int(run["context_steps"])
+    selection = pd.read_parquet(frozen / "selection_inputs.parquet")
+    predictions = pd.read_parquet(pred_path)
+    if predictions["case_id"].duplicated().any() or selection["case_id"].duplicated().any():
+        raise RuntimeError("Duplicate case IDs")
+    expected_ids = set(selection["case_id"].astype(str))
+    if set(predictions["case_id"].astype(str)) != expected_ids:
+        raise RuntimeError("Forecast set differs from frozen selection cohort")
+    if set(predictions["role"]) != {"selection"} or set(predictions["model"]) != {run["model"]} or set(predictions["context_steps"]) != {context}:
+        raise RuntimeError("Forecast metadata mismatch")
+    frozen_case_by_id = selection.set_index("case_id").to_dict(orient="index")
+    preds_by_case = predictions.set_index("case_id").to_dict(orient="index")
+    expected_windows = list(map(int, manifest["selection_window_indices"]))
+    if sorted(map(int, predictions["window_index"].unique())) != expected_windows:
+        raise RuntimeError("Missing selection windows")
+    rows = []
+    for wi in expected_windows:
+        window = task.get_window(wi)
+        # Ground truth is loaded ONLY inside this scoring process, and ONLY
+        # for the frozen selection windows. No evaluation targets are read.
+        gt = window.get_ground_truth()
+        past, _ = window.get_input_data()
+        gt_by_id = {str(rec[id_col]): rec for rec in gt}
+        past_by_id = {str(rec[id_col]): rec for rec in past}
+        if len(gt_by_id) != len(gt) or len(past_by_id) != len(past):
+            raise RuntimeError(f"Window {wi}: repeated ids")
+        expected_this_window = selection.loc[selection["window_index"] == wi]
+        for record in expected_this_window.to_dict(orient="records"):
+            ident, case = str(record["entity_id"]), str(record["case_id"])
+            if ident not in gt_by_id or ident not in past_by_id:
+                raise RuntimeError(f"Missing ground truth for {case}")
+            p = preds_by_case[case]
+            if str(p["entity_id"]) != ident or int(p["window_index"]) != wi:
+                raise RuntimeError(f"Forecast identity mismatch for {case}")
+            frozen_stamps = np.asarray(record["future_timestamps_ns"], dtype=np.int64)
+            forecast_stamps = np.asarray(p["future_timestamps_ns"], dtype=np.int64)
+            truth_stamps = truth_timestamps_ns(gt_by_id[ident][stamp_col])
+            if not (np.array_equal(frozen_stamps, forecast_stamps) and np.array_equal(frozen_stamps, truth_stamps)):
+                raise RuntimeError(f"Future timestamp mismatch for {case}")
+            mae, mase = evaluate_one(
+                p, gt_by_id[ident][target], past_by_id[ident][target],
+                horizon=int(manifest["horizon"]), seasonality=int(task.seasonality))
+            rows.append({"task": task_name, "model": run["model"], "context_steps": context,
+                         "case_id": case, "entity_id": ident, "window_index": wi,
+                         "mae": mae, "mase": mase})
+    result = pd.DataFrame(rows)
+    if len(result) != len(selection):
+        raise RuntimeError("Missing scores")
+    if result["mase"].notna().sum() == 0:
+        raise RuntimeError("No valid MASE denominators")
+    # Macro across cases, each has identical horizon. fev native MASE
+    # semantics will be verified separately before publication claims.
+    aggregate = {
+        "task": task_name, "model": run["model"], "context_steps": context,
+        "n_cases": len(result), "n_entities": int(result["entity_id"].nunique()),
+        "selection_mean_case_mae": float(result["mae"].mean()),
+        "selection_mean_case_mase": float(result["mase"].mean()),
+        "valid_mase_cases": int(result["mase"].notna().sum()),
+        "inference_seconds": run["inference_seconds"], "model_load_seconds": run["model_load_seconds"],
+        "metric_note": "Selection-only; paired cases. MASE from fev seasonal naive scaling; native fev score parity pending."
+    }
+    outdir = pred_path.parent
+    score_path, case_path = outdir / "selection_score.json", outdir / "selection_case_metrics.csv"
+    if score_path.exists() or case_path.exists():
+        raise FileExistsError("Scores already exist; refusing overwrite")
+    result.to_csv(case_path, index=False)
+    score_path.write_text(json.dumps(aggregate, indent=2) + "\n")
+    print("=" * 76)
+    print("PersTSFM FEV SELECTION SCORER — no evaluation windows opened")
+    print("=" * 76)
+    print(f"TASK {task_name} | MODEL {run['model']} | CONTEXT {context} | CASES {len(result)}")
+    print(f"Selection mean case MAE:  {aggregate['selection_mean_case_mae']:.6f}")
+    print(f"Selection mean case MASE: {aggregate['selection_mean_case_mase']:.6f} ({aggregate['valid_mase_cases']} valid)")
+    print(f"GPU inference (s): {run['inference_seconds']:.3f} | model load (s): {run['model_load_seconds']:.3f}")
+    print("PASS: selection-only scoring |", score_path)
+
+
+if __name__ == "__main__":
+    main()
