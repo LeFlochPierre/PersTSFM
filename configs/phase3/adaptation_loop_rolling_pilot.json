@@ -1,0 +1,20 @@
+{
+  "schema": "pertsfm_phase35_rolling_v1",
+  "experiment": {
+    "task": "LOOP_SEATTLE_1H",
+    "model": "chronos2",
+    "snapshot": "results/phase3/context_saturation_inputs/loop_preofficial_full_ns_v2.npz",
+    "max_entities": 0,
+    "contexts": [384, 768, 1536, 3072, 4096],
+    "lora_contexts": [768],
+    "histories": ["full"],
+    "budgets": [20, 100],
+    "seeds": [42, 43, 44],
+    "batch_size": 8,
+    "train_batch_size": 8,
+    "learning_rate": 0.00001,
+    "invalid_policy": "error",
+    "selection_metric": "validation_mae"
+  },
+  "rolling": {"folds": 4, "stride_horizons": 1, "require_aligned_ends": true}
+}

@@ -1,0 +1,71 @@
+{
+  "schema": "pertsfm_phase36_capability_v1",
+  "task": "LOOP_SEATTLE_1H",
+  "snapshot": "results/phase3/rolling/loop_full_nonoverlap_v1/folds/fold_00/history.npz",
+  "max_entities": 0,
+  "context": 768,
+  "zero_contexts": [
+    768,
+    4096
+  ],
+  "history": "full",
+  "batch_size": 8,
+  "trace_sampler": true,
+  "reload_check": true,
+  "selection_metric": "validation_mae",
+  "variants": [
+    {
+      "name": "lora_100_lr1e5_b32_s42",
+      "mode": "lora",
+      "steps": 100,
+      "batch_size": 32,
+      "learning_rate": 1e-05,
+      "seed": 42
+    },
+    {
+      "name": "lora_500_lr1e5_b32_s42",
+      "mode": "lora",
+      "steps": 500,
+      "batch_size": 32,
+      "learning_rate": 1e-05,
+      "seed": 42
+    },
+    {
+      "name": "lora_1000_lr1e5_b32_s42",
+      "mode": "lora",
+      "steps": 1000,
+      "batch_size": 32,
+      "learning_rate": 1e-05,
+      "seed": 42
+    },
+    {
+      "name": "lora_100_lr3e5_b32_s42",
+      "mode": "lora",
+      "steps": 100,
+      "batch_size": 32,
+      "learning_rate": 3e-05,
+      "seed": 42
+    },
+    {
+      "name": "lora_500_lr3e5_b32_s42",
+      "mode": "lora",
+      "steps": 500,
+      "batch_size": 32,
+      "learning_rate": 3e-05,
+      "seed": 42
+    },
+    {
+      "name": "lora_1000_lr3e5_b32_s42",
+      "mode": "lora",
+      "steps": 1000,
+      "batch_size": 32,
+      "learning_rate": 3e-05,
+      "seed": 42
+    }
+  ],
+  "zero_shot_parity": {
+    "768": 3.44538,
+    "4096": 3.43108
+  },
+  "zero_shot_atol": 0.02
+}

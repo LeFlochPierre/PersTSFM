@@ -1,0 +1,56 @@
+{
+  "schema_version": "pertsfm_b37_grid_v1",
+  "baseline_env": "PERTSFM_ENV",
+  "model_envs": {
+    "chronos2": "PERTSFM_ENV",
+    "tirex2": "PERTSFM_ENV",
+    "moirai2_small": "PERTSFM_MOIRAI_ENV",
+    "toto2_22m": "PERTSFM_TOTO_ENV",
+    "toto2_313m": "PERTSFM_TOTO_ENV",
+    "timesfm3": "PERTSFM_ENV"
+  },
+  "experiments": [
+    {
+      "dataset": "electricity", "active": true, "protocol_split": "validation",
+      "contexts_hours": [72, 96, 168, 336], "max_context_hours": 336,
+      "cohort": "results/direction_a/b31_electricity_53/cohort.json",
+      "shards": "results/direction_a/b31_electricity_53/shards",
+      "report_dir": "results/direction_a/b37_reports/electricity"
+    },
+    {
+      "dataset": "pems_bay", "active": true, "protocol_split": "validation",
+      "contexts_hours": [24, 72, 120, 168], "max_context_hours": 168,
+      "cohort": "results/direction_a/b32_pems_bay_8/cohort.json",
+      "shards": "results/direction_a/b32_pems_bay_8/shards",
+      "report_dir": "results/direction_a/b37_reports/pems_bay"
+    },
+    {
+      "dataset": "solar", "active": true, "protocol_split": "validation",
+      "contexts_hours": [6, 24, 48, 96], "max_context_hours": 96,
+      "cohort": "results/direction_a/b35_solar_28/cohort.json",
+      "shards": "results/direction_a/b35_solar_28/shards",
+      "report_dir": "results/direction_a/b37_reports/solar"
+    },
+    {
+      "dataset": "hupa_ucm", "active": false, "protocol_split": "development",
+      "contexts_hours": [6, 24, 72], "max_context_hours": 72,
+      "cohort": "results/direction_a/b37_hupa_ucm/cohort.json",
+      "shards": "results/direction_a/b37_hupa_ucm/shards",
+      "report_dir": "results/direction_a/b37_reports/hupa_ucm"
+    },
+    {
+      "dataset": "vitaldb", "active": false, "protocol_split": "validation",
+      "contexts_hours": [0.5, 2, 4], "max_context_hours": 4,
+      "cohort": "results/direction_a/b37_vitaldb/cohort.json",
+      "shards": "results/direction_a/b37_vitaldb/shards",
+      "report_dir": "results/direction_a/b37_reports/vitaldb"
+    },
+    {
+      "dataset": "physionet2019", "active": false, "protocol_split": "validation",
+      "contexts_hours": [6, 24, 48], "max_context_hours": 48,
+      "cohort": "results/direction_a/b37_physionet2019/cohort.json",
+      "shards": "results/direction_a/b37_physionet2019/shards",
+      "report_dir": "results/direction_a/b37_reports/physionet2019"
+    }
+  ]
+}

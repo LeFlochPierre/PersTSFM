@@ -1,0 +1,17 @@
+{
+  "phase": "B3.0 exploratory zero-shot capability atlas",
+  "training": false,
+  "model_keys_available_in_existing_factory": [
+    "chronos2", "tirex2", "moirai2_small", "toto2_22m", "toto2_313m", "timesfm3"
+  ],
+  "baselines": ["last_value", "seasonal_naive"],
+  "datasets": {
+    "electricity": {"context_hours": [96, 336], "horizon_steps": 96, "resolution_minutes": 15},
+    "pems_bay": {"context_hours": [24, 72, 168], "horizon_steps": 12, "resolution_minutes": 5},
+    "solar": {"context_hours": [6, 24, 96], "horizon_steps": 6, "resolution_minutes": 10},
+    "hupa_ucm": {"context_hours": [6, 24, 72], "horizon_steps": 12, "resolution_minutes": 5},
+    "vitaldb": {"context_hours": [0.5, 2, 4], "horizon_steps": 15, "resolution_minutes": 1},
+    "physionet2019": {"context_hours": [6, 24, 48], "horizon_steps": 6, "resolution_minutes": 60}
+  },
+  "note": "Planning grid only. Dataset specs come from src/data/registry.py; this JSON does not automatically run models. Validate context compatibility for each adapter."
+}

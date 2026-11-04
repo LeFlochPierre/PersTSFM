@@ -1,0 +1,57 @@
+{
+  "schema": "pertsfm_phase37a_atlas_v1",
+  "purpose": "Development-only adaptation opportunity scan; not a final evaluation or policy benchmark",
+  "screening": {
+    "steps": [100, 500],
+    "learning_rates": [1e-5, 3e-5],
+    "seeds": [42],
+    "train_batch_size": 32,
+    "inference_batch_size": 8,
+    "sample_entities": 128,
+    "sample_seed": 371
+  },
+  "datasets": [
+    {
+      "key": "loop_seattle", "family": "traffic", "role": "development",
+      "task": "LOOP_SEATTLE_1H",
+      "snapshot": "results/phase3/context_saturation_inputs/loop_preofficial_full_ns_v2.npz",
+      "preferred_context": 768, "max_zero_context": 4096, "minimum_entities": 16
+    },
+    {
+      "key": "mdense", "family": "hourly_benchmark", "role": "development",
+      "task": "M_DENSE_1H",
+      "snapshot": "results/phase3/context_saturation_inputs/mdense_preofficial_full_ns_v2.npz",
+      "preferred_context": 768, "max_zero_context": 4096, "minimum_entities": 16
+    },
+    {
+      "key": "solar", "family": "energy", "role": "development",
+      "task": "solar",
+      "snapshot": "results/phase37a/snapshots/solar.npz",
+      "preferred_context": 768, "max_zero_context": 3072, "minimum_entities": 8
+    },
+    {
+      "key": "pems_bay", "family": "traffic", "role": "development",
+      "task": "pems_bay",
+      "snapshot": "results/phase37a/snapshots/pems_bay.npz",
+      "preferred_context": 768, "max_zero_context": 3072, "minimum_entities": 8
+    },
+    {
+      "key": "vitaldb", "family": "clinical", "role": "development",
+      "task": "vitaldb",
+      "snapshot": "results/phase37a/snapshots/vitaldb.npz",
+      "preferred_context": 384, "max_zero_context": 1536, "minimum_entities": 8
+    },
+    {
+      "key": "physionet2019", "family": "clinical", "role": "development",
+      "task": "physionet2019",
+      "snapshot": "results/phase37a/snapshots/physionet2019.npz",
+      "preferred_context": 96, "max_zero_context": 384, "minimum_entities": 8
+    },
+    {
+      "key": "hupa_ucm", "family": "wearables", "role": "development",
+      "task": "hupa_ucm",
+      "snapshot": "results/phase37a/snapshots/hupa_ucm.npz",
+      "preferred_context": 384, "max_zero_context": 1536, "minimum_entities": 8
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "schema": "direction_a_actions_v0_example",
+  "notes": "Illustrative action definitions only. NOT a validated RTX6 timing or model registry.",
+  "actions": [
+    {"id": "seasonal_naive", "type": "classical", "checkpoint": null},
+    {"id": "chronos2_short", "type": "tsfm", "checkpoint": "amazon/chronos-2", "context_steps": 384},
+    {"id": "chronos2_long", "type": "tsfm", "checkpoint": "amazon/chronos-2", "context_steps": 1536}
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "schema": "pertsfm_phase36_capability_v1",
+  "task": "LOOP_SEATTLE_1H",
+  "snapshot": "results/phase3/rolling/loop_full_nonoverlap_v1/folds/fold_00/history.npz",
+  "max_entities": 4,
+  "context": 768,
+  "zero_contexts": [768, 4096],
+  "history": "full",
+  "batch_size": 4,
+  "trace_sampler": true,
+  "reload_check": true,
+  "selection_metric": "validation_mae",
+  "variants": [
+    {"name": "lora_2_lr1e5_b8_s42", "mode": "lora", "steps": 2, "batch_size": 8, "learning_rate": 0.00001, "seed": 42}
+  ]
+}

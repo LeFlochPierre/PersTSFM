@@ -1,0 +1,20 @@
+{
+  "schema": "pertsfm_phase35_rolling_v1",
+  "experiment": {
+    "task": "M_DENSE_1H",
+    "model": "chronos2",
+    "snapshot": "results/phase3/context_saturation_inputs/mdense_preofficial_full_ns_v2.npz",
+    "max_entities": 4,
+    "contexts": [768, 1536],
+    "lora_contexts": [768],
+    "histories": ["full"],
+    "budgets": [20],
+    "seeds": [42],
+    "batch_size": 4,
+    "train_batch_size": 4,
+    "learning_rate": 0.00001,
+    "invalid_policy": "error",
+    "selection_metric": "validation_mae"
+  },
+  "rolling": {"folds": 3, "stride_horizons": 1, "require_aligned_ends": true}
+}

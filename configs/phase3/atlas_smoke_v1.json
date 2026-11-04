@@ -1,0 +1,41 @@
+{
+  "schema": "pertsfm_phase37a_atlas_v1",
+  "purpose": "GPU integration smoke: 8 entities, 2 LoRA steps, not scientific evidence",
+  "screening": {
+    "steps": [
+      2
+    ],
+    "learning_rates": [
+      1e-05
+    ],
+    "seeds": [
+      42
+    ],
+    "train_batch_size": 32,
+    "inference_batch_size": 8,
+    "sample_entities": 8,
+    "sample_seed": 371
+  },
+  "datasets": [
+    {
+      "key": "loop_seattle",
+      "family": "traffic",
+      "role": "development",
+      "task": "LOOP_SEATTLE_1H",
+      "snapshot": "results/phase3/context_saturation_inputs/loop_preofficial_full_ns_v2.npz",
+      "preferred_context": 768,
+      "max_zero_context": 4096,
+      "minimum_entities": 4
+    },
+    {
+      "key": "mdense",
+      "family": "hourly_benchmark",
+      "role": "development",
+      "task": "M_DENSE_1H",
+      "snapshot": "results/phase3/context_saturation_inputs/mdense_preofficial_full_ns_v2.npz",
+      "preferred_context": 768,
+      "max_zero_context": 4096,
+      "minimum_entities": 4
+    }
+  ]
+}

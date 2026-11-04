@@ -1,0 +1,21 @@
+{
+  "schema": "pertsfm_phase34_batch_v1",
+  "experiments": [
+    {
+      "task": "LOOP_SEATTLE_1H",
+      "model": "chronos2",
+      "snapshot": "results/phase3/context_saturation_inputs/loop_preofficial_full_ns_v2.npz",
+      "max_entities": 0,
+      "contexts": [96, 384, 768, 1536, 3072, 4096, 6144],
+      "lora_contexts": [768],
+      "histories": ["full"],
+      "budgets": [20, 100, 500],
+      "seeds": [42, 43, 44],
+      "batch_size": 8,
+      "train_batch_size": 8,
+      "learning_rate": 0.00001,
+      "invalid_policy": "error",
+      "selection_metric": "validation_mae"
+    }
+  ]
+}

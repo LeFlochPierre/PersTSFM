@@ -1,0 +1,15 @@
+# EXTERNAL PILOT SPECIFICATION ONLY — NOT a B3.7 runner input.
+# These three configurations are copied from fev's official Tasks & Benchmarks tutorial.
+# Implement the fev EvaluationWindow adapter and FEV's official scoring before running.
+tasks:
+  - dataset_path: autogluon/chronos_datasets
+    dataset_config: monash_m1_quarterly
+    horizon: 8
+    seasonality: 4
+  - dataset_path: autogluon/chronos_datasets
+    dataset_config: monash_electricity_weekly
+    horizon: 8
+    num_windows: 2
+  - dataset_path: autogluon/chronos_datasets
+    dataset_config: monash_m1_yearly
+    horizon: 6

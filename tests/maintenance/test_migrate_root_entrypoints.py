@@ -15,16 +15,17 @@ def repo(tmp_path):
     for directory in ('src', 'scripts', 'tests'):
         (tmp_path / directory).mkdir()
     (tmp_path / 'README.md').write_text('repo\n')
-    p = tmp_path / 'scripts/phase3/PersTSFM_phase3_0_probe_value.py'
+    p = tmp_path / 'PersTSFM_phase3_0_probe_value.py'
+    p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text('def value(): return 42\n')
-    q = tmp_path / 'scripts/phase3/PersTSFM_phase3_1_adaptive_racing.py'
+    q = tmp_path / 'PersTSFM_phase3_1_adaptive_racing.py'
     q.write_text('from PersTSFM_phase3_0_probe_value import value\nassert value() == 42\n')
     t = tmp_path / 'tests' / 'test_script.py'
     t.write_text('''from pathlib import Path
 import importlib.util
-from scripts.phase3.PersTSFM_phase3_0_probe_value import value
+from PersTSFM_phase3_0_probe_value import value
 assert value() == 42
-p = Path(__file__).resolve().parents[1] / 'scripts/phase3/PersTSFM_phase3_1_adaptive_racing.py'
+p = Path(__file__).resolve().parents[1] / 'PersTSFM_phase3_1_adaptive_racing.py'
 assert p.is_file()
 def test_actual():
     assert value() == 42
@@ -43,7 +44,7 @@ def test_dry_run_does_not_mutate(tmp_path):
 def test_move_rewrite_import_and_path_then_restore(tmp_path):
     root = repo(tmp_path)
     assert m.main(['--root', str(root), '--apply']) == 0
-    assert not (root / 'scripts/phase3/PersTSFM_phase3_0_probe_value.py').exists()
+    assert not (root / 'PersTSFM_phase3_0_probe_value.py').exists()
     assert (root / 'scripts/phase3/PersTSFM_phase3_0_probe_value.py').is_file()
     text = (root / 'tests/test_script.py').read_text()
     assert 'from scripts.phase3.PersTSFM_phase3_0_probe_value import value' in text
@@ -53,7 +54,7 @@ def test_move_rewrite_import_and_path_then_restore(tmp_path):
     assert code.returncode == 0, code.stdout + code.stderr
     manifest = next((root / 'archive/manifests').rglob('manifest.json'))
     assert m.main(['--root', str(root), '--restore', str(manifest)]) == 0
-    assert (root / 'scripts/phase3/PersTSFM_phase3_0_probe_value.py').is_file()
+    assert (root / 'PersTSFM_phase3_0_probe_value.py').is_file()
     assert not (root / 'scripts/phase3/PersTSFM_phase3_0_probe_value.py').exists()
     assert 'from PersTSFM_phase3_0_probe_value import value' in (root / 'tests/test_script.py').read_text()
 

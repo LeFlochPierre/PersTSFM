@@ -1,0 +1,13 @@
+{
+  "stage": "B1.1_real_electricity",
+  "dataset": "electricity",
+  "protocol_split": "validation",
+  "entity_selection_seed": 20261102,
+  "entities": 2,
+  "calibration_origin_timestamps": 3,
+  "evaluation_origin_timestamps": 3,
+  "actions": ["seasonal_naive", "chronos2_4d", "chronos2_14d"],
+  "forecast_horizon_steps": 96,
+  "resolution_minutes": 15,
+  "experimental_warning": "Configuration reference only; CLI flags are the source of truth in B1.1."
+}

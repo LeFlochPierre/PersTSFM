@@ -41,8 +41,8 @@ INSTALLERS = (
     'PersTSFM_phase3_3a_fix_rolling_history.py',
 )
 DEST = {
-    **{x: 'scripts/phase2/' + x for x in PHASE2},
-    **{x: 'scripts/phase3/' + x for x in PHASE3},
+    **{Path(x).name: x for x in PHASE2},
+    **{Path(x).name: x for x in PHASE3},
     **{x: 'archive/installers/' + x for x in INSTALLERS},
 }
 ACTIVE = {x: d for x, d in DEST.items() if x not in INSTALLERS}
