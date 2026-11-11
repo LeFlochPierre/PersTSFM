@@ -1,51 +1,17 @@
 # PersTSFM
 
-## Research question
+PersTSFM is a feasibility-stage project on **horizon-aware reliable personalisation for cold-start time-series forecasting**. For a previously unseen entity with little history, we ask when its deviation from a population forecast will persist long enough to improve future forecasts. Methodological novelty is not established.
 
-When should a pretrained time-series model begin to personalize to a previously unseen entity as entity-specific observations accumulate?
+The first study will hold out entire electricity customers, reveal their history chronologically, and compare a frozen population forecaster with residual correction, empirical Bayes, hierarchical/Kalman correction, and a matched horizon-aware gate. If established methods explain the phenomenon, the hypothesis should be revised.
 
-## Initial hypothesis
+See the [research question](docs/research_proposal/research_question.md), [experiment plan](docs/research_proposal/experiment_plan.md), and [persistence workspace](research/persistence/README.md). The [previous project goal](docs/history/Project_Goal_budget_aware_2026-11-04.md) is historical documentation.
 
-For a new entity:
+## Repository map
 
-- with little entity-specific data, the population/global model should perform best;
-- as observations accumulate, a personalized model should improve;
-- there may be a crossover point n* at which personalization becomes beneficial;
-- n* should depend on entity heterogeneity, observation noise and representation mismatch.
+- `src/data/`, `src/models/`, `src/evaluation/`: existing loaders, forecast interfaces, metrics, and aggregation. Reuse requires protocol checks.
+- `src/selfconfig/`, `src/budgeted_forecasting/`, `src/experiments/adaptation_benchmark/`: previous research implementations retained with tests for reproducibility.
+- `scripts/phase2/`, `scripts/phase3/`, `scripts/direction_a/`: historical experiment entry points.
+- `docs/research_proposal/`: current scientific design. Other phase documents record previous work.
+- `data/`, `results/`, `archive/`: data, outputs, and archived material excluded from routine Git commits.
 
-## Phase 1
-
-Test whether a personalization crossover exists empirically.
-
-### Dataset
-ElectricityLoadDiagrams20112014
-
-Entity:
-individual electricity customer
-
-### Initial models
-
-1. Global / zero-shot time-series foundation model
-2. Local model trained only on the held-out entity
-3. Global model + simple personalized residual correction
-
-### Evaluation
-
-Hold out complete entities.
-
-For each test entity, reveal increasing amounts of history:
-
-n = 0, 2, 4, 8, 16, 32, 64 windows
-
-At each n:
-- adapt using past data only;
-- forecast the future;
-- record forecasting loss.
-
-Main output:
-
-forecast error vs number of entity-specific observations.
-
-## Key question
-
-Does there exist a systematic crossover point n* where personalized prediction becomes better than population prediction?
+No persistence forecasting method has been implemented or validated yet.
